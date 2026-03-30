@@ -188,12 +188,10 @@ def load_google_sheet():
     header_row = None
     for idx, row in df_raw.iterrows():
         cells = [normalize_header(cell) for cell in row.values]
-        if any(
-            pattern in cell
-            for cell in cells
-            if cell
-            for pattern in ["getraenk", "inhalt/getraenk", "metric", "spalte1"]
-        ):
+        first_cell = cells[0] if len(cells) > 0 else ""
+        second_cell = cells[1] if len(cells) > 1 else ""
+        has_drink_columns = any(cell for cell in cells[2:14])
+        if second_cell == "spalte1" and has_drink_columns:
             header_row = idx
             break
 
@@ -209,7 +207,7 @@ def load_google_sheet():
 
     normalized_columns = [normalize_header(col_name) for col_name in header_columns]
     for idx, cleaned_name in enumerate(normalized_columns):
-        if cleaned_name == "gesamt":
+        if "gesamt" in cleaned_name:
             total_col_idx = idx
             break
 
