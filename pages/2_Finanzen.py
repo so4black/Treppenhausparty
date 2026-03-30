@@ -176,6 +176,12 @@ def mark_planned_as_paid(sheet_row: int, payment_date: date):
     load_transactions.clear()
 
 
+def delete_transaction(sheet_row: int):
+    worksheet = get_worksheet()
+    worksheet.delete_rows(sheet_row)
+    load_transactions.clear()
+
+
 def resolve_name(name_choice: str, new_name: str) -> str:
     if name_choice == NAME_ADD_OPTION:
         return new_name.strip()
@@ -590,3 +596,29 @@ with overview_tab:
             use_container_width=True,
             hide_index=True,
         )
+
+        st.markdown("### Transaktion loeschen")
+        delete_options = {
+            row["_sheet_row"]: (
+                f"{row['Erfasst_Am']} | {row['Name']} | {row['Transaktions_Typ']} | "
+                f"{format_euro(row['Betrag'])} | {row['Beschreibung'] or row['Kategorie']}"
+            )
+            for _, row in ledger_df.iterrows()
+        }
+        selected_delete_row = st.selectbox(
+            "Welche Transaktion soll geloescht werden?",
+            options=list(delete_options.keys()),
+            format_func=lambda row_id: delete_options[row_id],
+            key="delete_transaction_row",
+        )
+        confirm_delete = st.checkbox(
+            "Ich moechte diese Transaktion wirklich dauerhaft loeschen.",
+            key="confirm_delete_transaction",
+        )
+        if st.button("Ausgewaehlte Transaktion loeschen", type="secondary"):
+            if not confirm_delete:
+                st.warning("Bitte bestaetige zuerst, dass die Transaktion wirklich geloescht werden soll.")
+            else:
+                delete_transaction(selected_delete_row)
+                st.success("Die Transaktion wurde geloescht.")
+                st.rerun()
