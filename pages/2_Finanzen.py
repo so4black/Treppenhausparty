@@ -598,12 +598,15 @@ with overview_tab:
         )
 
         st.markdown("### Transaktion loeschen")
+        delete_df = transactions_df.copy()
+        for date_col in ["Erfasst_Am", "Faellig_Am", "Bezahlt_Am"]:
+            delete_df[date_col] = delete_df[date_col].dt.strftime("%d.%m.%Y").fillna("-")
         delete_options = {
             row["_sheet_row"]: (
                 f"{row['Erfasst_Am']} | {row['Name']} | {row['Transaktions_Typ']} | "
                 f"{format_euro(row['Betrag'])} | {row['Beschreibung'] or row['Kategorie']}"
             )
-            for _, row in ledger_df.iterrows()
+            for _, row in delete_df.iterrows()
         }
         selected_delete_row = st.selectbox(
             "Welche Transaktion soll geloescht werden?",
