@@ -188,7 +188,12 @@ def load_google_sheet():
     header_row = None
     for idx, row in df_raw.iterrows():
         cells = [normalize_header(cell) for cell in row.values]
-        if any(pattern in cell for cell in cells if cell for pattern in ["getraenk", "metric", "spalte1"]):
+        if any(
+            pattern in cell
+            for cell in cells
+            if cell
+            for pattern in ["getraenk", "inhalt/getraenk", "metric", "spalte1"]
+        ):
             header_row = idx
             break
 
@@ -202,11 +207,19 @@ def load_google_sheet():
     first_drink_idx = 2 if len(header_columns) > 2 else None
     total_col_idx = None
 
-    for idx, col_name in enumerate(header_columns):
-        cleaned_name = clean_drink_name(col_name)
-        if cleaned_name.lower() == "gesamt":
+    normalized_columns = [normalize_header(col_name) for col_name in header_columns]
+    for idx, cleaned_name in enumerate(normalized_columns):
+        if cleaned_name == "gesamt":
             total_col_idx = idx
             break
+
+    if total_col_idx is None and first_drink_idx is not None:
+        for idx in range(first_drink_idx, len(header_columns)):
+            current = str(header_columns[idx]).strip()
+            next_value = str(header_columns[idx + 1]).strip() if idx + 1 < len(header_columns) else ""
+            if current and not next_value:
+                total_col_idx = idx
+                break
 
     if first_drink_idx is None or total_col_idx is None or total_col_idx < first_drink_idx:
         raise ValueError("Die Getränkespalten konnten nicht eindeutig bis zur 'Gesamt'-Spalte erkannt werden.")
