@@ -1,7 +1,7 @@
-import base64
-import json
 import os
 import re
+import base64
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -12,7 +12,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 from plotly.subplots import make_subplots
 import gspread
 
-st.title("Barkalkulation")
+st.title("🍹 THP26 Barkalkulation | 25.04.2026")
 st.markdown("Live-Daten aus Google Sheets laden und interaktive Dashboards anzeigen.")
 
 BACKGROUND_IMAGE_PATH = r"C:\Users\leul.zewdie\Desktop\privat\THP\Nordfluegelerweitert.jpg"
@@ -93,18 +93,32 @@ def normalize_number(value):
     text = str(value).strip()
     if not text or text.lower() in {"nan", "none", "n/a"}:
         return pd.NA
-    text = re.sub(r"[€\s\u00A0]", "", text)
+    text = text.replace("\u00A0", "").replace(" ", "")
+    text = re.sub(r"[^\d,.\-]", "", text)
     if "," in text and "." in text:
         text = text.replace(".", "").replace(",", ".")
     elif text.count(",") == 1 and text.count(".") == 0:
         text = text.replace(",", ".")
     elif text.count(".") > 1 and text.count(",") == 0:
         text = text.replace(".", "")
+    if text in {"", "-", ".", ","}:
+        return pd.NA
     return text
 
 
 def clean_numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series.astype(str).apply(normalize_number), errors="coerce")
+
+
+def clean_drink_name(value: str) -> str:
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return ""
+
+    text = re.split(r"\s+(?:noch\s+nicht|preis)\b", text, flags=re.IGNORECASE, maxsplit=1)[0].strip()
+
+    text = re.sub(r"\s+", " ", text).strip(" -")
+    return text
 
 
 def get_gspread_client():
@@ -172,14 +186,38 @@ def load_google_sheet():
     if header_row is None:
         raise ValueError("Die Tabelle konnte nicht analysiert werden. Die Zeile mit 'Getränk' wurde nicht gefunden.")
 
-    df_sheet = df_raw.iloc[header_row + 1 :].copy()
     header_columns = df_raw.iloc[header_row].astype(str).str.strip().tolist()
-    if len(header_columns) >= 2:
-        header_columns[0] = "Metric"
-        header_columns[1] = "Unit"
-    df_sheet.columns = header_columns
+
+    metric_col_idx = 0
+    unit_col_idx = 1 if len(header_columns) > 1 else None
+    first_drink_idx = 2 if len(header_columns) > 2 else None
+    total_col_idx = None
+
+    for idx, col_name in enumerate(header_columns):
+        cleaned_name = clean_drink_name(col_name)
+        if cleaned_name.lower() == "gesamt":
+            total_col_idx = idx
+            break
+
+    if first_drink_idx is None or total_col_idx is None or total_col_idx < first_drink_idx:
+        raise ValueError("Die Getränkespalten konnten nicht eindeutig bis zur 'Gesamt'-Spalte erkannt werden.")
+
+    selected_col_indices = [metric_col_idx]
+    if unit_col_idx is not None:
+        selected_col_indices.append(unit_col_idx)
+    selected_col_indices.extend(range(first_drink_idx, total_col_idx + 1))
+
+    df_sheet = df_raw.iloc[header_row + 1 :, selected_col_indices].copy()
+    trimmed_headers = [header_columns[idx] for idx in selected_col_indices]
+    if len(trimmed_headers) >= 2:
+        trimmed_headers[0] = "Metric"
+        trimmed_headers[1] = "Unit"
+    trimmed_headers[2:] = [clean_drink_name(col) for col in trimmed_headers[2:]]
+
+    df_sheet.columns = trimmed_headers
     df_sheet.columns.name = None
-    df_sheet = df_sheet[df_sheet["Metric"].notna()].copy()
+    df_sheet["Metric"] = df_sheet["Metric"].astype(str).str.strip()
+    df_sheet = df_sheet[df_sheet["Metric"].ne("") & df_sheet["Metric"].ne("nan")].copy()
 
     drink_cols = [col for col in df_sheet.columns if col not in ["Metric", "Unit"]]
     if not drink_cols:
@@ -242,6 +280,13 @@ def get_total_from_totals_row(totals_df: pd.DataFrame, patterns, fallback=None):
     return None
 
 
+def format_euro(value) -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    formatted = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{formatted} EUR"
+
+
 try:
     df = load_google_sheet()
 except Exception as exc:
@@ -284,22 +329,52 @@ if profit_col is None and qty_col and sell_col and cost_col:
 
 if sell_col:
     price_df = df[["Getränk", sell_col]].copy()
-    price_df[sell_col] = price_df[sell_col].apply(lambda v: f"{v:,.2f} €" if pd.notna(v) else "-")
     st.subheader("Verkaufspreise der Getränke")
-    if len(price_df) <= 8:
-        cols = st.columns(len(price_df))
-        for col_block, (_, row) in zip(cols, price_df.iterrows()):
+    cards_per_row = 4
+    for start_idx in range(0, len(price_df), cards_per_row):
+        row_slice = price_df.iloc[start_idx : start_idx + cards_per_row]
+        columns = st.columns(cards_per_row)
+        for col_block, (_, row) in zip(columns, row_slice.iterrows()):
             drink_name = row["Getränk"]
-            price_value = row[sell_col]
-            card_html = f"""
-                <div style=\"border:1px solid #d1d5db; border-radius:18px; padding:14px; text-align:center; background:#ffffff; box-shadow:0 4px 12px rgba(0,0,0,0.05);\">
-                    <div style=\"font-size:16px; font-weight:700; color:#111827; margin-bottom:8px;\">{drink_name}</div>
-                    <div style=\"font-size:22px; font-weight:700; color:#0f766e;\">{price_value}</div>
-                </div>
-            """
-            col_block.markdown(card_html, unsafe_allow_html=True)
-    else:
-        st.dataframe(price_df, use_container_width=True)
+            price_value = format_euro(row[sell_col])
+            col_block.markdown(
+                f"""
+<div style="
+    border:1px solid #cbd5e1;
+    border-radius:24px;
+    background:linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.96) 100%);
+    padding:20px;
+    box-shadow:0 16px 40px rgba(15, 23, 42, 0.12);
+    min-height:138px;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+">
+    <div style="
+        font-size:12px;
+        font-weight:800;
+        color:#64748b;
+        margin-bottom:12px;
+        text-transform:uppercase;
+        letter-spacing:0.08em;
+    ">Verkaufspreis</div>
+    <div style="
+        font-size:20px;
+        font-weight:800;
+        color:#0f172a;
+        line-height:1.25;
+        margin-bottom:12px;
+    ">{drink_name}</div>
+    <div style="
+        font-size:30px;
+        font-weight:800;
+        color:#0f766e;
+        line-height:1;
+    ">{price_value}</div>
+</div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 # Top-KPIs von der Sheet-Gesamtzeile übernehmen, wenn vorhanden
 if df_totals is not None and not df_totals.empty:
@@ -403,8 +478,8 @@ label_style = "font-size:14px; font-weight:700; color:#334155; margin-bottom:10p
 
 for col, label, value in [
     (col1, "Flaschen gesamt", f"{int(total_bottles):,}" if total_bottles is not None and not pd.isna(total_bottles) else "-"),
-    (col2, "Umsatz (Fall: Komplettverkauf)", f"{total_revenue:,.2f} €" if total_revenue is not None and not pd.isna(total_revenue) else "-"),
-    (col3, "Gewinn (Fall: Komplettverkauf)", f"{total_profit:,.2f} €" if total_profit is not None and not pd.isna(total_profit) else "-"),
+    (col2, "Umsatz (Fall: Komplettverkauf)", format_euro(total_revenue)),
+    (col3, "Gewinn (Fall: Komplettverkauf)", format_euro(total_profit)),
 ]:
     col.markdown(f"<div style='{card_style}'><div style='{label_style}'>{label}</div><div style='{value_style}'>{value}</div></div>", unsafe_allow_html=True)
 
