@@ -80,7 +80,8 @@ else:
     )
 
 SHEET_ID = "1z6pVOSBNUcrWAdmgQfuqfNpvlwBYUkPmd58Xu29kj-U"
-WORKSHEET_NAME = "THP26"
+WORKSHEET_NAME = "THP26_Preisberechnung"
+WORKSHEET_FALLBACKS = ["THP_Barkalk (Layout)"]
 PUBLIC_SHEET_NAME = "THP26_Preisberechnung"
 SERVICE_ACCOUNT_CANDIDATES = [
     Path("service_account.json"),
@@ -156,7 +157,15 @@ def load_google_sheet():
             try:
                 worksheet = sheet.worksheet(WORKSHEET_NAME)
             except gspread.WorksheetNotFound:
-                worksheet = sheet.sheet1
+                worksheet = None
+                for fallback_name in WORKSHEET_FALLBACKS:
+                    try:
+                        worksheet = sheet.worksheet(fallback_name)
+                        break
+                    except gspread.WorksheetNotFound:
+                        continue
+                if worksheet is None:
+                    raise
             values = worksheet.get_all_values()
             df_raw = pd.DataFrame(values)
         except Exception as error:

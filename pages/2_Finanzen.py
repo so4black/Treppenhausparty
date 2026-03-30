@@ -249,7 +249,6 @@ def build_person_summary(df: pd.DataFrame) -> pd.DataFrame:
     return summary.sort_values(["Gesamtanspruch_gegen_Haus", "Privat_vorgelegt"], ascending=[False, False])
 
 
-st.set_page_config(page_title="Treppenhausparty - Finanzen", page_icon="EUR", layout="wide")
 st.title("Treppenhausparty - Finanzuebersicht")
 st.caption("Einzahlungen, Ausgaben, offene Erstattungen und geplante Kosten an einem Ort.")
 
