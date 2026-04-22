@@ -15,6 +15,9 @@ SHEET_NAME = "Backend_Kasse"
 HEADER = ["ID", "Zeitstempel", "Produkte", "Anzahl_Gesamt",
           "Betrag_Gesamt", "Erhalten", "Rueckgeld", "Rabatt", "Kassierer"]
 
+KASSIERER_LIST = ["Freddy","Divin","Chrissi","Jan","Leul","Sohrab",
+                  "Aldar","Lorena","Anna K.","Michelle","Finn"]
+
 SERVICE_ACCOUNT_CANDIDATES = [
     Path("service_account.json"),
     Path(".streamlit/service_account.json"),
@@ -22,363 +25,9 @@ SERVICE_ACCOUNT_CANDIDATES = [
     Path(r"C:\Users\leul.zewdie\Downloads\party-dashboard-491808-a0ddf9a20e45.json"),
 ]
 
-KASSE_HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-html,body{height:100%;overflow:auto;margin:0}
-body{font-family:sans-serif;padding:12px;background:#f7f7f7}
-.container{display:flex;flex-wrap:wrap;gap:14px}
-.panel{flex:1 1 300px;min-width:300px;background:#fff;padding:16px;border-radius:12px;box-shadow:0 0 8px rgba(0,0,0,.1);display:flex;flex-direction:column}
-h2{margin:0 0 12px;font-size:18px}
-#kassBar{background:#1d4ed8;color:#fff;padding:7px 14px;margin:-16px -16px 12px;border-radius:12px 12px 0 0;display:flex;align-items:center;gap:10px;font-size:14px}
-#kassBar select{border-radius:5px;padding:3px 7px;font-size:13px;border:none}
-#syncStatus{margin-left:auto;font-size:12px;opacity:.85}
-.cart-box{flex:1 1 0;min-height:80px;overflow-y:auto;margin-bottom:8px;padding:8px;border-radius:8px;background:#f9fafb;border:2px dashed #bbb}
-.empty-cart{color:#999;text-align:center;margin-top:16px;font-style:italic;font-size:14px}
-#cartDiscount{font-weight:bold;margin:4px 0;font-size:13px}
-.top-left{display:flex;gap:14px;flex-wrap:wrap}
-.top-left>div{flex:1 1 180px;min-width:180px;display:flex;flex-direction:column}
-.number-pad{display:flex;gap:5px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:10px}
-.stats-line{background:#f0f0f0;border-radius:8px;font-size:12px;padding:5px 9px;white-space:nowrap;overflow:hidden}
-.pay-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
-.number-button{font-size:17px;padding:11px;border:none;border-radius:8px;cursor:pointer;background:#74b9ff;color:#fff}
-.number-button.highlight{box-shadow:0 0 0 3px #0984e3 inset}
-.special-btn{background:#a29bfe}
-.action-col{display:flex;flex-direction:column;gap:8px;min-width:160px}
-.action-col button{width:100%}
-.quick-btn{font-size:16px;color:#000}
-.quick-btn[data-val="10"]{background:#16a34a;color:#fff}
-.quick-btn[data-val="20"]{background:#eab308}
-.quick-btn[data-val="50"]{background:#dc5a21;color:#fff}
-button{font-size:14px;border:none;border-radius:5px;padding:9px 12px;cursor:pointer}
-.small-btn{background:#b2bec3;color:#2d3436;width:100%}
-.danger-btn{background:#d63031;color:#fff;width:100%}
-.pay-btn{background:#e17055;color:#fff;width:100%;font-size:16px}
-.pay-row{display:flex;gap:8px;margin-top:8px}
-.pay-row button{flex:1}
-#productButtons{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.product-button{width:100%;padding:10px;font-size:14px;text-align:left;border-radius:8px;border:none;cursor:pointer;color:#fff}
-.category{grid-column:1/-1;font-weight:bold;margin:14px 0 4px;font-size:14px}
-.cart-item{display:grid;grid-template-columns:1fr 100px auto auto auto;align-items:center;gap:8px;font-size:14px;margin-bottom:6px}
-.cart-sum{text-align:center}
-button.cart-op{padding:0 7px;font-size:14px;background:#dfe6e9;color:#2d3436}
-.disabled-cart{filter:grayscale(1);opacity:.4}
-.pay-section{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
-.display-box{font-size:26px;padding:10px;border:2px solid #0984e3;width:220px;text-align:right;background:#fff;border-radius:6px;margin-bottom:8px;box-shadow:0 0 8px rgba(9,132,227,.3)}
-.totals-box{width:220px;background:#f1f2f6;border-radius:6px;padding:8px;margin-bottom:8px;font-size:17px;border:2px solid #0984e3;box-shadow:0 0 8px rgba(9,132,227,.3)}
-.totals-box div{display:flex;justify-content:space-between}
-.change{font-size:17px;font-weight:bold;color:#d63031}
-.change.positive{color:#16a34a!important}
-.history-item{font-size:12px;border-bottom:1px solid #ccc;padding:3px 0}
-#paymentHistory{max-height:140px;overflow-y:auto;margin-top:4px}
-#historyLabel{font-size:11px;color:#888;margin:6px 0 2px;font-weight:bold;text-transform:uppercase}
-</style>
-<script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-database-compat.js"></script>
-<script>
-const firebaseConfig={apiKey:"AIzaSyB5wSCzf7cbCyi4NjMoDY8XD_FfAwl0LMw",authDomain:"kasse-thp.firebaseapp.com",databaseURL:"https://kasse-thp-default-rtdb.europe-west1.firebasedatabase.app",projectId:"kasse-thp",storageBucket:"kasse-thp.appspot.com",messagingSenderId:"649959661531",appId:"1:649959661531:web:f48ac1a2a41bd7eff851fe"};
-firebase.initializeApp(firebaseConfig);
-const db=firebase.database();
-
-// --- Products are defined locally, NOT stored in Firebase ---
-// (so icons/names are always from code, not stale Firebase state)
-const PRODUCT_DEFS=[
-  {name:'Bier',price:2.0,category:'Classics',color:'#00b894',icon:'🍺'},
-  {name:'Aeppler 0,33',price:3.0,category:'Classics',color:'#0984e3',icon:'🍏'},
-  {name:'+Pfand',price:0.5,category:'Classics',color:'#b6b904',icon:'♻️'},
-  {name:'Shot',price:1.5,category:'Shots',color:'#0984e3',icon:'🥃'},
-  {name:'Surprise Shot',price:0.5,category:'Shots',color:'#6c5ce7',icon:'🎲'},
-  {name:'Happy Hour Shot',price:1.0,category:'Shots',color:'#00cec9',icon:'⏰'},
-  {name:'Spezi',price:2.0,category:'alkoholfrei',color:'#00b894',icon:'🥤'},
-  {name:'Mate',price:3.0,category:'alkoholfrei',color:'#00b894',icon:'🧉'},
-  {name:'+Pfand',price:0.5,category:'alkoholfrei',color:'#b6b904',icon:'♻️'},
-  {name:'Limo 0,33',price:1.5,category:'alkoholfrei',color:'#0984e3',icon:'🍋'},
-  {name:'Red Bull',price:3.0,category:'alkoholfrei',color:'#0984e3',icon:'🐂'},
-  {name:'Sekt Mate',price:4.0,category:'Mischen',color:'#00b894',icon:'🥂'},
-  {name:'Vodka Mate',price:4.0,category:'Mischen',color:'#00b894',icon:'🍸'},
-  {name:'+Pfand',price:0.5,category:'Mischen',color:'#b6b904',icon:'♻️'},
-  {name:'Koks Mische',price:5.0,category:'Mischen',color:'#0984e3',icon:'🥃'},
-  {name:'Flasche Pfeffi',price:15.0,category:'Specials',color:'#6c5ce7',icon:'🌿'},
-  {name:'Golfclub',price:15.0,category:'Specials',color:'#6c5ce7',icon:'⛳'},
-  {name:'ACAB',price:110.0,category:'Specials',color:'#d63031',icon:'🚨'},
-  {name:'Bierpong',price:15.0,category:'Specials',color:'#6c5ce7',icon:'🏓'},
-  {name:'Mischkonsum',price:15.0,category:'Specials',color:'#6c5ce7',icon:'🍹'},
-  {name:'Schmeisse Runde',price:16.0,category:'Specials',color:'#e17055',icon:'🎉'}
-];
-const CATEGORY_ICONS={Classics:'🍺',Shots:'🥃',alkoholfrei:'🧃',Mischen:'🍹',Specials:'⭐'};
-
-// Runtime state (cart, stats, history) from Firebase
-const cart={},soldStats={},paymentHistory=[];
-let soldRevenue=0;
-
-// Sheet-history injected from Python
-const SHEET_HISTORY=__SHEET_HISTORY_JSON__;
-
-// localStorage helpers
-function lsKey(k){return 'kasse_thp_'+k;}
-function saveLS(){try{localStorage.setItem(lsKey('paymentHistory'),JSON.stringify(paymentHistory));localStorage.setItem(lsKey('soldStats'),JSON.stringify(soldStats));localStorage.setItem(lsKey('soldRevenue'),String(soldRevenue));}catch(e){}}
-function loadLS(){try{const ph=localStorage.getItem(lsKey('paymentHistory'));const ss=localStorage.getItem(lsKey('soldStats'));const sr=localStorage.getItem(lsKey('soldRevenue'));return{ph:ph?JSON.parse(ph):[],ss:ss?JSON.parse(ss):{},sr:sr?parseFloat(sr):0};}catch(e){return{ph:[],ss:{},sr:0};}}
-
-// Firebase: only sync cart/stats/history (NOT products)
-db.ref('state').on('value',snap=>{
-  const s=snap.val();
-  const ls=loadLS();
-  if(s){
-    for(const k in cart)delete cart[k];
-    Object.assign(cart,s.cart||{});
-    for(const k in soldStats)delete soldStats[k];
-    const fbStats=s.soldStats||{};
-    Object.assign(soldStats,Object.keys(fbStats).length>0?fbStats:ls.ss);
-    const fbHistory=s.paymentHistory||[];
-    paymentHistory.length=0;
-    paymentHistory.push(...(fbHistory.length>=ls.ph.length?fbHistory:ls.ph));
-    soldRevenue=s.soldRevenue>0?s.soldRevenue:ls.sr;
-  } else {
-    paymentHistory.length=0;paymentHistory.push(...ls.ph);
-    Object.assign(soldStats,ls.ss);
-    soldRevenue=ls.sr;
-  }
-  if(typeof renderCart==='function'){renderCart();updateHistory();renderStats();}
-});
-
-function persist(){
-  db.ref('state').set({cart,soldStats,soldRevenue,paymentHistory});
-  saveLS();
-}
-window.addEventListener('beforeunload',persist);
-window.addEventListener('unload',persist);
-</script>
-</head>
-<body>
-<div class="container">
-  <div class="panel">
-    <div id="kassBar">
-      <span>👤 Kassierer:</span>
-      <select id="kassSelect" onchange="onKassChange()">
-        <option>Freddy</option><option>Divin</option><option>Chrissi</option>
-        <option>Jan</option><option>Leul</option><option>Sohrab</option>
-        <option>Aldar</option><option>Lorena</option><option>Anna K.</option>
-        <option>Michelle</option><option>Finn</option>
-      </select>
-      <span id="syncStatus"></span>
-    </div>
-    <div class="top-left">
-      <div>
-        <h2>🔢 Anzahl</h2>
-        <div id="quantityPad" class="number-pad"></div>
-        <div id="statView" class="stats-line"></div>
-      </div>
-    </div>
-    <div id="productButtons"></div>
-  </div>
-  <div class="panel">
-    <h2>🛒 Warenkorb</h2>
-    <div class="cart-box"><div id="cartItems"></div><div id="cartDiscount"></div></div>
-    <div class="pay-section">
-      <div>
-        <div id="payAmountDisplay" class="display-box">0 EUR</div>
-        <div class="totals-box">
-          <div><span>Gesamt:</span><span id="total">0.00 EUR</span></div>
-          <div class="change"><span>Rueckgeld:</span><span id="change">0.00 EUR</span></div>
-        </div>
-        <div id="payPad" class="pay-pad"></div>
-        <div class="pay-row">
-          <button class="pay-btn" onclick="checkout()">✅ Zahlung abschliessen</button>
-          <button class="danger-btn" onclick="cancelOrder()">❌ Stornieren</button>
-        </div>
-      </div>
-      <div class="action-col">
-        <button id="discountBtn" class="small-btn" onclick="toggleDiscount()">💸 Rabatt</button>
-        <button class="small-btn" onclick="makeFree()">🎁 Gratis</button>
-        <button class="quick-btn" data-val="10" onclick="quickPay(10)">💶 10 EUR</button>
-        <button class="quick-btn" data-val="20" onclick="quickPay(20)">💶 20 EUR</button>
-        <button class="quick-btn" data-val="50" onclick="quickPay(50)">💶 50 EUR</button>
-        <button class="quick-btn" onclick="exactPay()">💯 Passend</button>
-      </div>
-    </div>
-    <div style="margin:10px 0 4px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="small-btn" onclick="showFullHistory()">📋 Alle Umsaetze</button>
-      <button class="small-btn" onclick="showStatsWindow()">📊 Statistik</button>
-    </div>
-    <div id="historyLabel">Letzte Transaktionen:</div>
-    <div id="paymentHistory"></div>
-  </div>
-</div>
-<script>
-// Build category map from PRODUCT_DEFS
-const categoryList={};
-PRODUCT_DEFS.forEach(p=>{(categoryList[p.category]=categoryList[p.category]||[]).push(p);});
-
-let selectedQuantity=1,payAmount="",discountInput="",freeInvoice=false,mode="pay";
-const paymentHistoryEl=document.getElementById('paymentHistory');
-const statView=document.getElementById('statView');
-const nBtn=(txt,extra='')=>{const b=document.createElement('button');b.textContent=txt;b.className='number-button'+(extra?' '+extra:'');return b;};
-
-function renderQuantityPad(){
-  const pad=document.getElementById('quantityPad');pad.innerHTML='';
-  ['1','2','3','4','5','6','7','8','9','0','C'].forEach(l=>{const b=nBtn(l);b.onclick=()=>handleQuantity(l,b);pad.appendChild(b);});
-}
-function handleQuantity(l,btn){
-  if(l==='C'){selectedQuantity=1;document.querySelectorAll('#quantityPad .number-button').forEach(x=>x.classList.remove('highlight'));}
-  else{selectedQuantity=+l;document.querySelectorAll('#quantityPad .number-button').forEach(x=>x.classList.remove('highlight'));btn.classList.add('highlight');}
-}
-function renderProducts(){
-  const wrap=document.getElementById('productButtons');wrap.innerHTML='';
-  for(const cat in categoryList){
-    wrap.insertAdjacentHTML('beforeend','<div class="category">'+(CATEGORY_ICONS[cat]||'')+' '+cat+'</div>');
-    categoryList[cat].forEach(p=>{
-      const b=document.createElement('button');
-      b.className='product-button';b.style.background=p.color;
-      b.textContent=(p.icon?p.icon+' ':'')+p.name+' - '+p.price.toFixed(2)+' EUR';
-      b.onclick=()=>{
-        const key=p.category+'::'+p.name;
-        if(!cart[key])cart[key]={...p,quantity:0,key};
-        cart[key].quantity+=selectedQuantity;
-        selectedQuantity=1;renderCart();
-        document.querySelectorAll('#quantityPad .number-button').forEach(x=>x.classList.remove('highlight'));
-        persist();
-      };
-      wrap.appendChild(b);
-    });
-  }
-}
-function calcTotal(base){
-  let d=0;
-  if(discountInput)d=discountInput.endsWith('%')?base*(parseFloat(discountInput)/100||0):parseFloat(discountInput.replace(',','.'))||0;
-  if(freeInvoice)d=base;
-  return Math.max(0,base-d);
-}
-function renderCart(){
-  const c=document.getElementById('cartItems');c.innerHTML='';let pre=0;
-  for(const k in cart){
-    const it=cart[k],sum=it.quantity*it.price;pre+=sum;
-    const d=document.createElement('div');d.className='cart-item';
-    d.innerHTML='<span>'+it.quantity+'x '+it.name+' a '+it.price.toFixed(2)+' EUR</span><span class="cart-sum">= '+sum.toFixed(2)+' EUR</span>';
-    ['+','-','x'].forEach(sym=>{
-      const b=document.createElement('button');b.className='cart-op';b.textContent=sym;
-      if(sym==='+')b.onclick=()=>{it.quantity++;renderCart();persist();};
-      else if(sym==='-')b.onclick=()=>{if(--it.quantity<=0)delete cart[k];renderCart();persist();};
-      else b.onclick=()=>{delete cart[k];renderCart();persist();};
-      d.appendChild(b);
-    });
-    c.appendChild(d);
-  }
-  if(Object.keys(cart).length===0)c.innerHTML='<div class="empty-cart">Warenkorb leer</div>';
-  cartDiscount.textContent=freeInvoice?'Rabatt: 100%':discountInput?'Rabatt: '+(discountInput.endsWith('%')?discountInput:discountInput+' EUR'):'';
-  total.textContent=calcTotal(pre).toFixed(2);
-  c.classList.toggle('disabled-cart',freeInvoice);
-  updateChange();renderStats();
-}
-function renderPayPad(){
-  const pad=document.getElementById('payPad');pad.innerHTML='';
-  ['7','8','9','4','5','6','1','2','3','0','%','E','.','C','<'].forEach(l=>{
-    const b=nBtn(l,(l==='E'||l==='%'?'special-btn':''));b.onclick=()=>handlePay(l);pad.appendChild(b);
-  });
-}
-function handlePay(l){
-  if(l==='C'){mode==='discount'?discountInput='':payAmount='';}
-  else if(l==='<'){mode==='discount'?discountInput=discountInput.slice(0,-1):payAmount=payAmount.slice(0,-1);}
-  else if(l==='E'){if(mode==='discount'&&discountInput.endsWith('%'))discountInput=discountInput.slice(0,-1);}
-  else if(l==='%'){if(mode==='discount'&&!discountInput.endsWith('%'))discountInput+='%';}
-  else{mode==='discount'?discountInput+=l:payAmount+=l;}
-  updateDisplays();renderCart();
-}
-function updateDisplays(){
-  payAmountDisplay.textContent=mode==='discount'?'Rabatt: '+(discountInput.endsWith('%')?discountInput:(discountInput||'0')+' EUR'):(payAmount||'0')+' EUR';
-}
-function updateChange(){
-  const diff=parseFloat((payAmount||'0').replace(',','.'))-parseFloat(total.textContent);
-  change.textContent=isNaN(diff)?'0.00 EUR':diff.toFixed(2)+' EUR';
-  diff>0?change.classList.add('positive'):change.classList.remove('positive');
-}
-function toggleDiscount(){
-  if(mode!=='discount'){mode='discount';discountBtn.textContent='💾 Rabatt speichern';}
-  else{mode='pay';discountBtn.textContent='💸 Rabatt';renderCart();updateDisplays();persist();}
-}
-function makeFree(){freeInvoice=!freeInvoice;renderCart();persist();}
-const quickPay=v=>{mode='pay';payAmount=String(v);updateDisplays();updateChange();};
-function exactPay(){mode='pay';payAmount=parseFloat(total.textContent).toFixed(2);updateDisplays();updateChange();}
-function cancelOrder(){
-  if(confirm('Bestellung wirklich stornieren?')){
-    for(const k in cart)delete cart[k];
-    payAmount=discountInput='';freeInvoice=false;mode='pay';
-    renderCart();updateDisplays();persist();
-  }
-}
-
-function checkout(){
-  if(mode==='discount')toggleDiscount();
-  const totalNum=parseFloat(total.textContent),recv=parseFloat((payAmount||'0').replace(',','.'))||0;
-  if(!freeInvoice&&recv<totalNum){alert('Betrag zu gering!');return;}
-  const changeVal=(recv-totalNum).toFixed(2);
-  const itemList=Object.values(cart);
-  const items=itemList.map(x=>x.quantity+'x '+x.name).join(', ');
-  const anzahl=itemList.reduce((s,x)=>s+x.quantity,0);
-  const kassierer=document.getElementById('kassSelect').value;
-  const now=new Date();
-  const ts=now.toLocaleString('de-DE');
-  const entry=now.toLocaleTimeString()+' ['+kassierer+'] - '+totalNum.toFixed(2)+' EUR | '+items;
-
-  // Write to Firebase pendingCheckouts so Python can pick it up
-  const checkoutId='co_'+now.getTime();
-  db.ref('pendingCheckouts/'+checkoutId).set({
-    zeitstempel:ts,
-    produkte:items,
-    anzahl_gesamt:anzahl,
-    betrag:totalNum,
-    erhalten:recv,
-    rueckgeld:parseFloat(changeVal),
-    rabatt:freeInvoice?'100%':(discountInput||''),
-    kassierer:kassierer,
-    done:false
-  });
-
-  paymentHistory.unshift(entry);updateHistory();
-  for(const k in cart)soldStats[k.split('::')[1]]=(soldStats[k.split('::')[1]]||0)+cart[k].quantity;
-  soldRevenue+=totalNum;
-  saveLS();
-  document.getElementById('syncStatus').textContent='✅ Gespeichert';
-  setTimeout(()=>{document.getElementById('syncStatus').textContent='';},3000);
-  alert('Zahlung erfolgreich!\\n'+entry);
-  for(const k in cart)delete cart[k];
-  payAmount=discountInput='';freeInvoice=false;renderCart();updateDisplays();persist();
-}
-
-function updateHistory(){
-  paymentHistoryEl.innerHTML=paymentHistory.slice(0,8).map(e=>'<div class="history-item">'+e+'</div>').join('');
-}
-function onKassChange(){
-  const kass=document.getElementById('kassSelect').value;
-  const sheetRows=(SHEET_HISTORY[kass]||[]);
-  if(paymentHistory.length===0&&sheetRows.length>0){
-    paymentHistoryEl.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:2px">📄 Aus Sheet (letzte Eintraege):</div>'+sheetRows.slice(0,8).map(e=>'<div class="history-item" style="color:#666">'+e+'</div>').join('');
-  } else {
-    updateHistory();
-  }
-}
-function renderStats(){
-  const pieces=Object.values(soldStats).reduce((s,n)=>s+n,0);
-  statView.textContent='TX: '+paymentHistory.length+'  Stueck: '+pieces+'  '+soldRevenue.toFixed(2)+' EUR';
-}
-function showStatsWindow(){
-  const w=open('','_blank'),pieces=Object.values(soldStats).reduce((s,n)=>s+n,0);
-  w.document.write('<h2>Umsatzstatistik</h2><table border=1 cellpadding=6>');
-  for(const p in soldStats)w.document.write('<tr><td>'+p+'</td><td>'+soldStats[p]+'</td></tr>');
-  w.document.write('<tr style="font-weight:bold"><td>Summe Stueck</td><td>'+pieces+'</td></tr><tr style="font-weight:bold"><td>Gesamtumsatz</td><td>'+soldRevenue.toFixed(2)+' EUR</td></tr></table>');
-}
-function showFullHistory(){
-  const w=open('','_blank');
-  w.document.write('<h2>Alle Umsaetze</h2>');
-  paymentHistory.forEach(e=>w.document.write('<div style="padding:3px 0;border-bottom:1px solid #ccc">'+e+'</div>'));
-}
-renderQuantityPad();renderPayPad();renderProducts();renderCart();
-setTimeout(()=>{if(paymentHistory.length===0)onKassChange();},1500);
-</script>
-</body>
-</html>"""
+# Custom component — bidirectional, so setComponentValue works
+_component_dir = Path(__file__).parent.parent / "kasse_component"
+_kasse = components.declare_component("kasse", path=str(_component_dir))
 
 
 def get_gspread_client():
@@ -432,33 +81,6 @@ def append_kasse_row(data: dict):
     load_kasse.clear()
 
 
-def get_firebase_pending() -> list[tuple]:
-    """Read pendingCheckouts from Firebase REST API and return list of (key, data)."""
-    import urllib.request
-    url = "https://kasse-thp-default-rtdb.europe-west1.firebasedatabase.app/pendingCheckouts.json"
-    try:
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            raw = json.loads(resp.read().decode())
-        if not raw:
-            return []
-        return [(k, v) for k, v in raw.items() if isinstance(v, dict) and not v.get("done")]
-    except Exception:
-        return []
-
-
-def mark_firebase_done(key: str):
-    """Mark a pendingCheckout as done via Firebase REST PATCH."""
-    import urllib.request
-    url = f"https://kasse-thp-default-rtdb.europe-west1.firebasedatabase.app/pendingCheckouts/{key}.json"
-    data = json.dumps({"done": True}).encode()
-    req = urllib.request.Request(url, data=data, method="PATCH",
-                                 headers={"Content-Type": "application/json"})
-    try:
-        urllib.request.urlopen(req, timeout=5)
-    except Exception:
-        pass
-
-
 @st.cache_data(ttl=30)
 def load_kasse():
     ws = get_worksheet()
@@ -508,69 +130,33 @@ st.title("🍺 Touch-Kasse")
 kasse_tab, auswertung_tab = st.tabs(["Kasse", "Auswertung"])
 
 with kasse_tab:
-    # Auto-process pending checkouts from Firebase
-    pending = get_firebase_pending()
-    if pending:
-        saved_count = 0
-        for key, data in pending:
-            try:
-                append_kasse_row(data)
-                mark_firebase_done(key)
-                saved_count += 1
-            except Exception as e:
-                st.warning(f"Fehler beim Speichern von {key}: {e}")
-        if saved_count:
-            st.success(f"✅ {saved_count} Zahlung(en) automatisch ins Sheet gespeichert.")
-            st.rerun()
-
-    st.caption("Kassierer waehlen, Produkte antippen, Betrag eingeben, Zahlung abschliessen.")
-
-    with st.expander("Manuell ins Sheet eintragen (Notfall)", expanded=False):
-        with st.form("checkout_form", clear_on_submit=True):
-            fc1, fc2, fc3, fc4 = st.columns([2, 1, 3, 1])
-            with fc1:
-                f_kassierer = st.selectbox("Kassierer", ["Freddy","Divin","Chrissi","Jan","Leul","Sohrab","Aldar","Lorena","Anna K.","Michelle","Finn"])
-            with fc2:
-                f_betrag = st.number_input("Betrag (EUR)", min_value=0.0, step=0.5, format="%.2f")
-            with fc3:
-                f_produkte = st.text_input("Produkte", placeholder="2x Bier, 1x Mate, 1x Shot")
-            with fc4:
-                f_rabatt = st.text_input("Rabatt", placeholder="10% oder leer")
-            f_submit = st.form_submit_button("💾 Ins Sheet speichern", type="primary")
-
-        if f_submit and f_betrag > 0:
-            anzahl = 0
-            for teil in f_produkte.split(","):
-                teil = teil.strip()
-                if "x " in teil:
-                    try:
-                        anzahl += int(teil.split("x ")[0].strip())
-                    except ValueError:
-                        pass
-            append_kasse_row({
-                "kassierer": f_kassierer,
-                "betrag": f_betrag,
-                "erhalten": f_betrag,
-                "rueckgeld": 0,
-                "produkte": f_produkte,
-                "anzahl_gesamt": anzahl,
-                "rabatt": f_rabatt,
-            })
-            st.success(f"✅ {format_euro(f_betrag)} von {f_kassierer} gespeichert.")
-            st.rerun()
-
-    # Load sheet history and inject into HTML template
     try:
-        df_kasse = load_kasse()
-        sheet_history = build_sheet_history(df_kasse, n=10)
+        df_for_history = load_kasse()
+        sheet_history = build_sheet_history(df_for_history, n=10)
     except Exception:
         sheet_history = {}
 
-    kasse_html = KASSE_HTML_TEMPLATE.replace(
-        "__SHEET_HISTORY_JSON__",
-        json.dumps(sheet_history, ensure_ascii=False)
+    # Render custom component — receives checkout dict via setComponentValue when user checks out
+    checkout_data = _kasse(
+        kassierer_list=KASSIERER_LIST,
+        sheet_history=sheet_history,
+        key="kasse_main",
     )
-    components.html(kasse_html, height=820, scrolling=True)
+
+    # When checkout_data is set by JS, write to sheet
+    if checkout_data and isinstance(checkout_data, dict) and checkout_data.get("type") == "checkout":
+        # Deduplicate: skip if we already processed this exact checkout (same ts_epoch)
+        last_epoch = st.session_state.get("last_checkout_epoch", 0)
+        this_epoch = checkout_data.get("ts_epoch", 0)
+        if this_epoch != last_epoch:
+            st.session_state["last_checkout_epoch"] = this_epoch
+            try:
+                append_kasse_row(checkout_data)
+                kassierer = checkout_data.get("kassierer", "")
+                betrag = checkout_data.get("betrag", 0)
+                st.success(f"✅ {format_euro(betrag)} von {kassierer} ins Sheet gespeichert.")
+            except Exception as e:
+                st.error(f"Fehler beim Speichern: {e}")
 
 with auswertung_tab:
     if st.button("Daten neu laden"):
@@ -629,7 +215,8 @@ with auswertung_tab:
                 continue
 
     if product_counts:
-        prod_df = pd.DataFrame(sorted(product_counts.items(), key=lambda x: x[1], reverse=True), columns=["Produkt", "Stueck"])
+        prod_df = pd.DataFrame(sorted(product_counts.items(), key=lambda x: x[1], reverse=True),
+                               columns=["Produkt", "Stueck"])
         fig3 = go.Figure(go.Bar(x=prod_df["Produkt"], y=prod_df["Stueck"],
                                 text=prod_df["Stueck"], textposition="outside", marker_color="#16a34a"))
         fig3.update_layout(height=340, margin={"l":10,"r":10,"t":10,"b":10}, yaxis_title="Stueck")
