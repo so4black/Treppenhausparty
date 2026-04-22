@@ -196,27 +196,32 @@ def numpad_press(val: str):
 st.set_page_config(page_title="THP - Kasse", page_icon="🍺", layout="wide")
 init_state()
 
-# Custom CSS for product buttons
 st.markdown("""
 <style>
-/* Alle Buttons gleich groß und kompakt */
-button[kind="secondary"], button[kind="primary"] {
+/* Kein Gap zwischen Columns */
+div[data-testid="stHorizontalBlock"] {
+    gap: 4px !important;
+}
+/* Alle Buttons: gleiche Höhe, volle Breite, kein Overflow */
+div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] button {
     width: 100% !important;
-    min-height: 44px !important;
-    max-height: 44px !important;
+    height: 46px !important;
+    min-height: 46px !important;
+    max-height: 46px !important;
     font-size: 13px !important;
-    padding: 0 6px !important;
+    padding: 0 4px !important;
     border-radius: 6px !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
+    display: block !important;
 }
-/* Numpad-Buttons etwas kleiner */
-div[data-testid="stHorizontalBlock"] button[kind="secondary"] {
-    min-height: 40px !important;
-    max-height: 40px !important;
-    font-size: 15px !important;
-    font-weight: bold !important;
+/* Auch der Column-Wrapper soll keine Margins haben */
+div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+    padding: 0 2px !important;
+}
+div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] > div {
+    margin-bottom: 4px !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -236,11 +241,11 @@ with kasse_tab:
         st.markdown("**🔢 Anzahl**")
         qcols = st.columns(11)
         for i, q in enumerate([1,2,3,4,5,6,7,8,9,10]):
-            if qcols[i].button(str(q), key=f"q_{q}",
+            if qcols[i].button(str(q), key=f"q_{q}", use_container_width=True,
                                type="primary" if st.session_state.quantity == q else "secondary"):
                 st.session_state.quantity = q
                 st.rerun()
-        if qcols[10].button("C", key="q_c"):
+        if qcols[10].button("C", key="q_c", use_container_width=True):
             st.session_state.quantity = 1
             st.rerun()
     with top3:
@@ -262,7 +267,7 @@ with kasse_tab:
             cols = st.columns(3)
             for idx, p in enumerate(items):
                 label = f"{p['name']} — {p['price']:.2f} €"
-                if cols[idx % 3].button(label, key=f"prod_{cat}_{p['name']}_{idx}"):
+                if cols[idx % 3].button(label, key=f"prod_{cat}_{p['name']}_{idx}", use_container_width=True):
                     add_to_cart(p)
                     st.rerun()
 
@@ -277,29 +282,29 @@ with kasse_tab:
                 c1.write(f"{item['quantity']}x **{item['name']}**")
                 c2.write(f"{item['price']:.2f}")
                 c3.write(f"= {item['quantity']*item['price']:.2f}")
-                if c4.button("➕", key=f"plus_{key}"):
+                if c4.button("+", key=f"plus_{key}", use_container_width=True):
                     st.session_state.cart[key]["quantity"] += 1
                     st.rerun()
-                if c5.button("➖", key=f"minus_{key}"):
+                if c5.button("-", key=f"minus_{key}", use_container_width=True):
                     st.session_state.cart[key]["quantity"] -= 1
                     if st.session_state.cart[key]["quantity"] <= 0:
                         del st.session_state.cart[key]
                     st.rerun()
 
         # Discount
-        disc_col1, disc_col2 = st.columns([3, 1])
-        new_disc = disc_col1.text_input("💸 Rabatt (z.B. 10% oder 2.50)", value=st.session_state.discount,
-                                         key="disc_input", label_visibility="collapsed",
-                                         placeholder="Rabatt: 10% oder 2.50 EUR")
+        new_disc = st.text_input("Rabatt", value=st.session_state.discount,
+                                 key="disc_input", label_visibility="collapsed",
+                                 placeholder="Rabatt: 10% oder 2.50 EUR")
         if new_disc != st.session_state.discount:
             st.session_state.discount = new_disc
 
         free_cols = st.columns(2)
-        if free_cols[0].button("🎁 Gratis" if not st.session_state.free else "🎁 Gratis ✓",
-                               type="primary" if st.session_state.free else "secondary"):
+        if free_cols[0].button("Gratis" if not st.session_state.free else "Gratis (aktiv)",
+                               type="primary" if st.session_state.free else "secondary",
+                               use_container_width=True):
             st.session_state.free = not st.session_state.free
             st.rerun()
-        if free_cols[1].button("🗑️ Warenkorb leeren"):
+        if free_cols[1].button("Warenkorb leeren", use_container_width=True):
             st.session_state.cart = {}
             st.session_state.discount = ""
             st.session_state.free = False
@@ -333,7 +338,7 @@ with kasse_tab:
         # Quick pay buttons
         qp_cols = st.columns(4)
         for i, amt in enumerate([5, 10, 20, 50]):
-            if qp_cols[i].button(f"{amt} €", key=f"qp_{amt}"):
+            if qp_cols[i].button(f"{amt} EUR", key=f"qp_{amt}", use_container_width=True):
                 st.session_state.pay_amount = str(amt)
                 st.rerun()
 
@@ -342,7 +347,7 @@ with kasse_tab:
         for row in pad_rows:
             rcols = st.columns(3)
             for i, val in enumerate(row):
-                if val and rcols[i].button(val, key=f"pad_{val}_{row}"):
+                if val and rcols[i].button(val, key=f"pad_{val}_{row}", use_container_width=True):
                     numpad_press("⌫" if val == "<" else val)
                     st.rerun()
 
