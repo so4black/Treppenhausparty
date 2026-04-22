@@ -199,14 +199,25 @@ init_state()
 # Custom CSS for product buttons
 st.markdown("""
 <style>
-div[data-testid="column"] button {
-    width: 100%;
-    border-radius: 8px;
-    font-size: 13px;
-    padding: 6px 4px;
-    min-height: 52px;
+/* Alle Buttons gleich groß und kompakt */
+button[kind="secondary"], button[kind="primary"] {
+    width: 100% !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+    font-size: 13px !important;
+    padding: 0 6px !important;
+    border-radius: 6px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
 }
-.stButton button { width: 100%; }
+/* Numpad-Buttons etwas kleiner */
+div[data-testid="stHorizontalBlock"] button[kind="secondary"] {
+    min-height: 40px !important;
+    max-height: 40px !important;
+    font-size: 15px !important;
+    font-weight: bold !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
