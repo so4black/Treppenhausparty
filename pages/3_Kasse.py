@@ -227,13 +227,30 @@ def product_grid_html() -> str:
 st.set_page_config(page_title="THP - Kasse", page_icon="🍺", layout="wide")
 init_state()
 
-# Handle product click via query param
+# Handle query params (product clicks + numpad)
 qp = st.query_params
+_rerun = False
 if "add" in qp:
     try:
         add_to_cart(int(qp["add"]))
     except (ValueError, IndexError):
         pass
+    _rerun = True
+if "np" in qp:
+    v = qp["np"]
+    if v == "back":
+        numpad_press("⌫")
+    elif v == "clear":
+        numpad_press("C")
+    elif v == "exact":
+        try:
+            st.session_state.pay_amount = qp.get("val", "0")
+        except Exception:
+            pass
+    else:
+        numpad_press(v)
+    _rerun = True
+if _rerun:
     st.query_params.clear()
     st.rerun()
 
@@ -403,38 +420,45 @@ with kasse_tab:
         </div>
         """, unsafe_allow_html=True)
 
-        # Schnellzahlung
-        st.markdown("<div style='color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin:6px 0 3px'>Schnellzahlung</div>", unsafe_allow_html=True)
-        qp2 = st.columns(4)
-        for i, amt in enumerate([5, 10, 20, 50]):
-            if qp2[i].button(f"{amt} €", key=f"qp_{amt}", use_container_width=True):
-                st.session_state.pay_amount = str(amt)
-                st.rerun()
+        # Schnellzahlung + Numpad als HTML-Grid (kein Streamlit-Row-Abstand)
+        btn_style = "display:flex;align-items:center;justify-content:center;background:#1e2130;color:#fff;border-radius:8px;font-size:18px;font-weight:700;height:54px;cursor:pointer;text-decoration:none;border:1px solid #2d3148"
+        quick_style = "display:flex;align-items:center;justify-content:center;background:#1d4ed8;color:#fff;border-radius:8px;font-size:14px;font-weight:700;height:44px;cursor:pointer;text-decoration:none"
+        passend_style = "display:flex;align-items:center;justify-content:center;background:#2d3148;color:#aaa;border-radius:8px;font-size:13px;font-weight:600;height:44px;cursor:pointer;text-decoration:none"
+        clr_style = "display:flex;align-items:center;justify-content:center;background:#3d1515;color:#e17055;border-radius:8px;font-size:13px;font-weight:600;height:44px;cursor:pointer;text-decoration:none"
 
-        # Numpad
-        st.markdown("<div style='color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin:8px 0 3px'>Betrag eingeben</div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div style='font-size:30px;font-weight:700;color:#fff;background:#1a1d27;"
-            f"border-radius:8px;padding:10px 14px;margin-bottom:6px;text-align:right;"
-            f"border:1px solid #2d3148'>{st.session_state.pay_amount or '0'} €</div>",
-            unsafe_allow_html=True
-        )
-        for row in [["7","8","9"], ["4","5","6"], ["1","2","3"], ["0",".","<"]]:
-            st.markdown('<div class="numpad-row">', unsafe_allow_html=True)
-            rcols = st.columns(3)
-            for i, val in enumerate(row):
-                if rcols[i].button(val, key=f"np_{val}_{row[0]}", use_container_width=True):
-                    numpad_press("⌫" if val == "<" else val)
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+        total_str = f"{total:.2f}"
+        st.markdown(f"""
+        <div style='color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin:8px 0 4px'>Schnellzahlung</div>
+        <div style='display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:10px'>
+          <a href='?np=5' style='{quick_style}'>5 €</a>
+          <a href='?np=10' style='{quick_style}'>10 €</a>
+          <a href='?np=20' style='{quick_style}'>20 €</a>
+          <a href='?np=50' style='{quick_style}'>50 €</a>
+        </div>
 
-        bot1, bot2 = st.columns(2)
-        if bot1.button("C  (löschen)", key="np_C", use_container_width=True):
-            numpad_press("C")
-            st.rerun()
-        if bot2.button("Passend", key="np_passend", use_container_width=True):
-            st.session_state.pay_amount = f"{total:.2f}"
-            st.rerun()
+        <div style='color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin:0 0 4px'>Betrag eingeben</div>
+        <div style='font-size:30px;font-weight:700;color:#fff;background:#1a1d27;border-radius:8px;
+                    padding:10px 14px;margin-bottom:6px;text-align:right;border:1px solid #2d3148'>
+          {st.session_state.pay_amount or '0'} €
+        </div>
+
+        <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:5px'>
+          <a href='?np=7' style='{btn_style}'>7</a>
+          <a href='?np=8' style='{btn_style}'>8</a>
+          <a href='?np=9' style='{btn_style}'>9</a>
+          <a href='?np=4' style='{btn_style}'>4</a>
+          <a href='?np=5' style='{btn_style}'>5</a>
+          <a href='?np=6' style='{btn_style}'>6</a>
+          <a href='?np=1' style='{btn_style}'>1</a>
+          <a href='?np=2' style='{btn_style}'>2</a>
+          <a href='?np=3' style='{btn_style}'>3</a>
+          <a href='?np=0' style='{btn_style}'>0</a>
+          <a href='?np=.' style='{btn_style}'>.</a>
+          <a href='?np=back' style='{btn_style}'>⌫</a>
+          <a href='?np=clear' style='{clr_style}'>C löschen</a>
+          <a href='?np=exact&val={total_str}' style='{passend_style};grid-column:span 2'>Passend ({total_str} €)</a>
+        </div>
+        """, unsafe_allow_html=True)
 
         # Checkout
         st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
