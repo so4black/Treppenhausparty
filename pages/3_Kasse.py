@@ -72,9 +72,9 @@ button.cart-op{padding:0 7px;font-size:14px;background:#dfe6e9;color:#2d3436}
 .totals-box div{display:flex;justify-content:space-between}
 .change{font-size:17px;font-weight:bold;color:#d63031}
 .change.positive{color:#16a34a!important}
-.history-item{font-size:12px;border-bottom:1px solid #ccc;padding:2px 0}
-#paymentHistory{max-height:120px;overflow-y:auto}
-#historyLabel{font-size:12px;color:#666;margin:6px 0 2px;font-weight:bold}
+.history-item{font-size:12px;border-bottom:1px solid #ccc;padding:3px 0}
+#paymentHistory{max-height:140px;overflow-y:auto;margin-top:4px}
+#historyLabel{font-size:11px;color:#888;margin:6px 0 2px;font-weight:bold;text-transform:uppercase}
 </style>
 <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-database-compat.js"></script>
@@ -82,43 +82,70 @@ button.cart-op{padding:0 7px;font-size:14px;background:#dfe6e9;color:#2d3436}
 const firebaseConfig={apiKey:"AIzaSyB5wSCzf7cbCyi4NjMoDY8XD_FfAwl0LMw",authDomain:"kasse-thp.firebaseapp.com",databaseURL:"https://kasse-thp-default-rtdb.europe-west1.firebasedatabase.app",projectId:"kasse-thp",storageBucket:"kasse-thp.appspot.com",messagingSenderId:"649959661531",appId:"1:649959661531:web:f48ac1a2a41bd7eff851fe"};
 firebase.initializeApp(firebaseConfig);
 const db=firebase.database();
-const products=[],categoryList={},cart={},soldStats={},paymentHistory=[];
+
+// --- Products are defined locally, NOT stored in Firebase ---
+// (so icons/names are always from code, not stale Firebase state)
+const PRODUCT_DEFS=[
+  {name:'Bier',price:2.0,category:'Classics',color:'#00b894',icon:'🍺'},
+  {name:'Aeppler 0,33',price:3.0,category:'Classics',color:'#0984e3',icon:'🍏'},
+  {name:'+Pfand',price:0.5,category:'Classics',color:'#b6b904',icon:'♻️'},
+  {name:'Shot',price:1.5,category:'Shots',color:'#0984e3',icon:'🥃'},
+  {name:'Surprise Shot',price:0.5,category:'Shots',color:'#6c5ce7',icon:'🎲'},
+  {name:'Happy Hour Shot',price:1.0,category:'Shots',color:'#00cec9',icon:'⏰'},
+  {name:'Spezi',price:2.0,category:'alkoholfrei',color:'#00b894',icon:'🥤'},
+  {name:'Mate',price:3.0,category:'alkoholfrei',color:'#00b894',icon:'🧉'},
+  {name:'+Pfand',price:0.5,category:'alkoholfrei',color:'#b6b904',icon:'♻️'},
+  {name:'Limo 0,33',price:1.5,category:'alkoholfrei',color:'#0984e3',icon:'🍋'},
+  {name:'Red Bull',price:3.0,category:'alkoholfrei',color:'#0984e3',icon:'🐂'},
+  {name:'Sekt Mate',price:4.0,category:'Mischen',color:'#00b894',icon:'🥂'},
+  {name:'Vodka Mate',price:4.0,category:'Mischen',color:'#00b894',icon:'🍸'},
+  {name:'+Pfand',price:0.5,category:'Mischen',color:'#b6b904',icon:'♻️'},
+  {name:'Koks Mische',price:5.0,category:'Mischen',color:'#0984e3',icon:'🥃'},
+  {name:'Flasche Pfeffi',price:15.0,category:'Specials',color:'#6c5ce7',icon:'🌿'},
+  {name:'Golfclub',price:15.0,category:'Specials',color:'#6c5ce7',icon:'⛳'},
+  {name:'ACAB',price:110.0,category:'Specials',color:'#d63031',icon:'🚨'},
+  {name:'Bierpong',price:15.0,category:'Specials',color:'#6c5ce7',icon:'🏓'},
+  {name:'Mischkonsum',price:15.0,category:'Specials',color:'#6c5ce7',icon:'🍹'},
+  {name:'Schmeisse Runde',price:16.0,category:'Specials',color:'#e17055',icon:'🎉'}
+];
+const CATEGORY_ICONS={Classics:'🍺',Shots:'🥃',alkoholfrei:'🧃',Mischen:'🍹',Specials:'⭐'};
+
+// Runtime state (cart, stats, history) from Firebase
+const cart={},soldStats={},paymentHistory=[];
 let soldRevenue=0;
 
-// Sheet-history injected from Python (last N rows per kassierer)
-const SHEET_HISTORY = __SHEET_HISTORY_JSON__;
+// Sheet-history injected from Python
+const SHEET_HISTORY=__SHEET_HISTORY_JSON__;
 
+// localStorage helpers
 function lsKey(k){return 'kasse_thp_'+k;}
 function saveLS(){try{localStorage.setItem(lsKey('paymentHistory'),JSON.stringify(paymentHistory));localStorage.setItem(lsKey('soldStats'),JSON.stringify(soldStats));localStorage.setItem(lsKey('soldRevenue'),String(soldRevenue));}catch(e){}}
 function loadLS(){try{const ph=localStorage.getItem(lsKey('paymentHistory'));const ss=localStorage.getItem(lsKey('soldStats'));const sr=localStorage.getItem(lsKey('soldRevenue'));return{ph:ph?JSON.parse(ph):[],ss:ss?JSON.parse(ss):{},sr:sr?parseFloat(sr):0};}catch(e){return{ph:[],ss:{},sr:0};}}
 
+// Firebase: only sync cart/stats/history (NOT products)
 db.ref('state').on('value',snap=>{
   const s=snap.val();
   const ls=loadLS();
-  products.length=0;
   if(s){
-    products.push(...(s.products||[]));
-    Object.assign(categoryList,s.categoryList||{});
+    for(const k in cart)delete cart[k];
     Object.assign(cart,s.cart||{});
-    // Prefer Firebase data if it has more entries, else fall back to localStorage
-    const fbHistory=s.paymentHistory||[];
-    const mergedHistory=fbHistory.length>=ls.ph.length?fbHistory:ls.ph;
-    paymentHistory.length=0;paymentHistory.push(...mergedHistory);
+    for(const k in soldStats)delete soldStats[k];
     const fbStats=s.soldStats||{};
-    const hasFbStats=Object.keys(fbStats).length>0;
-    Object.assign(soldStats,hasFbStats?fbStats:ls.ss);
+    Object.assign(soldStats,Object.keys(fbStats).length>0?fbStats:ls.ss);
+    const fbHistory=s.paymentHistory||[];
+    paymentHistory.length=0;
+    paymentHistory.push(...(fbHistory.length>=ls.ph.length?fbHistory:ls.ph));
     soldRevenue=s.soldRevenue>0?s.soldRevenue:ls.sr;
   } else {
-    // Firebase empty: restore from localStorage
     paymentHistory.length=0;paymentHistory.push(...ls.ph);
     Object.assign(soldStats,ls.ss);
     soldRevenue=ls.sr;
   }
-  if(typeof renderProducts==='function'){renderProducts();renderCart();updateHistory();}
+  if(typeof renderCart==='function'){renderCart();updateHistory();renderStats();}
 });
 
 function persist(){
-  db.ref('state').set({products,categoryList,cart,soldStats,soldRevenue,paymentHistory});
+  db.ref('state').set({cart,soldStats,soldRevenue,paymentHistory});
   saveLS();
 }
 window.addEventListener('beforeunload',persist);
@@ -181,57 +208,107 @@ window.addEventListener('unload',persist);
   </div>
 </div>
 <script>
-// Product icon mapping
-const PRODUCT_ICONS={
-  'Bier':'🍺','Aeppler 0,33':'🍏','+Pfand':'♻️','Shot':'🥃','Surprise Shot':'🎲',
-  'Happy Hour Shot':'⏰','Spezi':'🥤','Mate':'🧉','Limo 0,33':'🍋','Red Bull':'🐂',
-  'Sekt Mate':'🥂','Vodka Mate':'🍸','Koks Mische':'🥃','Flasche Pfeffi':'🌿',
-  'Golfclub':'⛳','ACAB':'🚨','Bierpong':'🏓','Mischkonsum':'🍹','Schmeisse Runde':'🎉'
-};
+// Build category map from PRODUCT_DEFS
+const categoryList={};
+PRODUCT_DEFS.forEach(p=>{(categoryList[p.category]=categoryList[p.category]||[]).push(p);});
 
-products.push(
-  {name:'Bier',price:2.0,category:'Classics',color:'#00b894'},
-  {name:'Aeppler 0,33',price:3.0,category:'Classics',color:'#0984e3'},
-  {name:'+Pfand',price:0.5,category:'Classics',color:'#b6b904'},
-  {name:'Shot',price:1.5,category:'Shots',color:'#0984e3'},
-  {name:'Surprise Shot',price:0.5,category:'Shots',color:'#0984e3'},
-  {name:'Happy Hour Shot',price:1.0,category:'Shots',color:'#0984e3'},
-  {name:'Spezi',price:2.0,category:'alkoholfrei',color:'#00b894'},
-  {name:'Mate',price:3.0,category:'alkoholfrei',color:'#00b894'},
-  {name:'+Pfand',price:0.5,category:'alkoholfrei',color:'#b6b904'},
-  {name:'Limo 0,33',price:1.5,category:'alkoholfrei',color:'#0984e3'},
-  {name:'Red Bull',price:3.0,category:'alkoholfrei',color:'#0984e3'},
-  {name:'Sekt Mate',price:4.0,category:'Mischen',color:'#00b894'},
-  {name:'Vodka Mate',price:4.0,category:'Mischen',color:'#00b894'},
-  {name:'+Pfand',price:0.5,category:'Mischen',color:'#b6b904'},
-  {name:'Koks Mische',price:5.0,category:'Mischen',color:'#0984e3'},
-  {name:'Flasche Pfeffi',price:15.0,category:'Specials',color:'#0984e3'},
-  {name:'Golfclub',price:15.0,category:'Specials',color:'#0984e3'},
-  {name:'ACAB',price:110.0,category:'Specials',color:'#0984e3'},
-  {name:'Bierpong',price:15.0,category:'Specials',color:'#0984e3'},
-  {name:'Mischkonsum',price:15.0,category:'Specials',color:'#0984e3'},
-  {name:'Schmeisse Runde',price:16.0,category:'Specials',color:'#0984e3'}
-);
-function rebuildCategories(){for(const k in categoryList)delete categoryList[k];products.forEach(p=>(categoryList[p.category]=categoryList[p.category]||[]).push(p));}
-rebuildCategories();
 let selectedQuantity=1,payAmount="",discountInput="",freeInvoice=false,mode="pay";
 const paymentHistoryEl=document.getElementById('paymentHistory');
 const statView=document.getElementById('statView');
 const nBtn=(txt,extra='')=>{const b=document.createElement('button');b.textContent=txt;b.className='number-button'+(extra?' '+extra:'');return b;};
-function renderQuantityPad(){const pad=document.getElementById('quantityPad');pad.innerHTML='';['1','2','3','4','5','6','7','8','9','0','C'].forEach(l=>{const b=nBtn(l);b.onclick=()=>handleQuantity(l,b);pad.appendChild(b);});}
-function handleQuantity(l,btn){if(l==='C'){selectedQuantity=1;document.querySelectorAll('#quantityPad .number-button').forEach(x=>x.classList.remove('highlight'));}else{selectedQuantity=+l;document.querySelectorAll('#quantityPad .number-button').forEach(x=>x.classList.remove('highlight'));btn.classList.add('highlight');}}
-function renderProducts(){const wrap=document.getElementById('productButtons');wrap.innerHTML='';for(const cat in categoryList){const catIcons={'Classics':'🍺','Shots':'🥃','alkoholfrei':'🧃','Mischen':'🍹','Specials':'⭐'};wrap.insertAdjacentHTML('beforeend','<div class="category">'+(catIcons[cat]||'')+(catIcons[cat]?' ':'')+cat+'</div>');categoryList[cat].forEach(p=>{const b=document.createElement('button');b.className='product-button';b.style.background=p.color;const icon=PRODUCT_ICONS[p.name]||'';b.textContent=(icon?icon+' ':'')+p.name+' - '+p.price.toFixed(2)+' EUR';b.onclick=()=>{(cart[p.name]=cart[p.name]||{...p,quantity:0}).quantity+=selectedQuantity;selectedQuantity=1;renderCart();document.querySelectorAll('#quantityPad .number-button').forEach(x=>x.classList.remove('highlight'));persist();};wrap.appendChild(b);});}}
-function calcTotal(base){let d=0;if(discountInput)d=discountInput.endsWith('%')?base*(parseFloat(discountInput)/100||0):parseFloat(discountInput.replace(',','.'))||0;if(freeInvoice)d=base;return Math.max(0,base-d);}
-function renderCart(){const c=document.getElementById('cartItems');c.innerHTML='';let pre=0;for(const k in cart){const it=cart[k],sum=it.quantity*it.price;pre+=sum;const d=document.createElement('div');d.className='cart-item';d.innerHTML='<span>'+it.quantity+'x '+it.name+' a '+it.price.toFixed(2)+' EUR</span><span class="cart-sum">= '+sum.toFixed(2)+' EUR</span>';['+','-','x'].forEach(sym=>{const b=document.createElement('button');b.className='cart-op';b.textContent=sym;if(sym==='+')b.onclick=()=>{it.quantity++;renderCart();persist();};else if(sym==='-')b.onclick=()=>{if(--it.quantity<=0)delete cart[k];renderCart();persist();};else b.onclick=()=>{delete cart[k];renderCart();persist();};d.appendChild(b);});c.appendChild(d);}if(Object.keys(cart).length===0)c.innerHTML='<div class="empty-cart">Warenkorb leer</div>';cartDiscount.textContent=freeInvoice?'Rabatt: 100%':discountInput?'Rabatt: '+(discountInput.endsWith('%')?discountInput:discountInput+' EUR'):'';total.textContent=calcTotal(pre).toFixed(2);c.classList.toggle('disabled-cart',freeInvoice);updateChange();renderStats();}
-function renderPayPad(){const pad=document.getElementById('payPad');pad.innerHTML='';['7','8','9','4','5','6','1','2','3','0','%','E','.','C','<'].forEach(l=>{const b=nBtn(l,(l==='E'||l==='%'?'special-btn':''));b.onclick=()=>handlePay(l);pad.appendChild(b);});}
-function handlePay(l){if(l==='C'){mode==='discount'?discountInput='':payAmount='';}else if(l==='<'){mode==='discount'?discountInput=discountInput.slice(0,-1):payAmount=payAmount.slice(0,-1);}else if(l==='E'){if(mode==='discount'&&discountInput.endsWith('%'))discountInput=discountInput.slice(0,-1);}else if(l==='%'){if(mode==='discount'&&!discountInput.endsWith('%'))discountInput+='%';}else{mode==='discount'?discountInput+=l:payAmount+=l;}updateDisplays();renderCart();}
-function updateDisplays(){payAmountDisplay.textContent=mode==='discount'?'Rabatt: '+(discountInput.endsWith('%')?discountInput:(discountInput||'0')+' EUR'):(payAmount||'0')+' EUR';}
-function updateChange(){const diff=parseFloat((payAmount||'0').replace(',','.'))-parseFloat(total.textContent);change.textContent=isNaN(diff)?'0.00 EUR':diff.toFixed(2)+' EUR';diff>0?change.classList.add('positive'):change.classList.remove('positive');}
-function toggleDiscount(){if(mode!=='discount'){mode='discount';discountBtn.textContent='💾 Rabatt speichern';}else{mode='pay';discountBtn.textContent='💸 Rabatt';renderCart();updateDisplays();persist();}}
+
+function renderQuantityPad(){
+  const pad=document.getElementById('quantityPad');pad.innerHTML='';
+  ['1','2','3','4','5','6','7','8','9','0','C'].forEach(l=>{const b=nBtn(l);b.onclick=()=>handleQuantity(l,b);pad.appendChild(b);});
+}
+function handleQuantity(l,btn){
+  if(l==='C'){selectedQuantity=1;document.querySelectorAll('#quantityPad .number-button').forEach(x=>x.classList.remove('highlight'));}
+  else{selectedQuantity=+l;document.querySelectorAll('#quantityPad .number-button').forEach(x=>x.classList.remove('highlight'));btn.classList.add('highlight');}
+}
+function renderProducts(){
+  const wrap=document.getElementById('productButtons');wrap.innerHTML='';
+  for(const cat in categoryList){
+    wrap.insertAdjacentHTML('beforeend','<div class="category">'+(CATEGORY_ICONS[cat]||'')+' '+cat+'</div>');
+    categoryList[cat].forEach(p=>{
+      const b=document.createElement('button');
+      b.className='product-button';b.style.background=p.color;
+      b.textContent=(p.icon?p.icon+' ':'')+p.name+' - '+p.price.toFixed(2)+' EUR';
+      b.onclick=()=>{
+        const key=p.category+'::'+p.name;
+        if(!cart[key])cart[key]={...p,quantity:0,key};
+        cart[key].quantity+=selectedQuantity;
+        selectedQuantity=1;renderCart();
+        document.querySelectorAll('#quantityPad .number-button').forEach(x=>x.classList.remove('highlight'));
+        persist();
+      };
+      wrap.appendChild(b);
+    });
+  }
+}
+function calcTotal(base){
+  let d=0;
+  if(discountInput)d=discountInput.endsWith('%')?base*(parseFloat(discountInput)/100||0):parseFloat(discountInput.replace(',','.'))||0;
+  if(freeInvoice)d=base;
+  return Math.max(0,base-d);
+}
+function renderCart(){
+  const c=document.getElementById('cartItems');c.innerHTML='';let pre=0;
+  for(const k in cart){
+    const it=cart[k],sum=it.quantity*it.price;pre+=sum;
+    const d=document.createElement('div');d.className='cart-item';
+    d.innerHTML='<span>'+it.quantity+'x '+it.name+' a '+it.price.toFixed(2)+' EUR</span><span class="cart-sum">= '+sum.toFixed(2)+' EUR</span>';
+    ['+','-','x'].forEach(sym=>{
+      const b=document.createElement('button');b.className='cart-op';b.textContent=sym;
+      if(sym==='+')b.onclick=()=>{it.quantity++;renderCart();persist();};
+      else if(sym==='-')b.onclick=()=>{if(--it.quantity<=0)delete cart[k];renderCart();persist();};
+      else b.onclick=()=>{delete cart[k];renderCart();persist();};
+      d.appendChild(b);
+    });
+    c.appendChild(d);
+  }
+  if(Object.keys(cart).length===0)c.innerHTML='<div class="empty-cart">Warenkorb leer</div>';
+  cartDiscount.textContent=freeInvoice?'Rabatt: 100%':discountInput?'Rabatt: '+(discountInput.endsWith('%')?discountInput:discountInput+' EUR'):'';
+  total.textContent=calcTotal(pre).toFixed(2);
+  c.classList.toggle('disabled-cart',freeInvoice);
+  updateChange();renderStats();
+}
+function renderPayPad(){
+  const pad=document.getElementById('payPad');pad.innerHTML='';
+  ['7','8','9','4','5','6','1','2','3','0','%','E','.','C','<'].forEach(l=>{
+    const b=nBtn(l,(l==='E'||l==='%'?'special-btn':''));b.onclick=()=>handlePay(l);pad.appendChild(b);
+  });
+}
+function handlePay(l){
+  if(l==='C'){mode==='discount'?discountInput='':payAmount='';}
+  else if(l==='<'){mode==='discount'?discountInput=discountInput.slice(0,-1):payAmount=payAmount.slice(0,-1);}
+  else if(l==='E'){if(mode==='discount'&&discountInput.endsWith('%'))discountInput=discountInput.slice(0,-1);}
+  else if(l==='%'){if(mode==='discount'&&!discountInput.endsWith('%'))discountInput+='%';}
+  else{mode==='discount'?discountInput+=l:payAmount+=l;}
+  updateDisplays();renderCart();
+}
+function updateDisplays(){
+  payAmountDisplay.textContent=mode==='discount'?'Rabatt: '+(discountInput.endsWith('%')?discountInput:(discountInput||'0')+' EUR'):(payAmount||'0')+' EUR';
+}
+function updateChange(){
+  const diff=parseFloat((payAmount||'0').replace(',','.'))-parseFloat(total.textContent);
+  change.textContent=isNaN(diff)?'0.00 EUR':diff.toFixed(2)+' EUR';
+  diff>0?change.classList.add('positive'):change.classList.remove('positive');
+}
+function toggleDiscount(){
+  if(mode!=='discount'){mode='discount';discountBtn.textContent='💾 Rabatt speichern';}
+  else{mode='pay';discountBtn.textContent='💸 Rabatt';renderCart();updateDisplays();persist();}
+}
 function makeFree(){freeInvoice=!freeInvoice;renderCart();persist();}
 const quickPay=v=>{mode='pay';payAmount=String(v);updateDisplays();updateChange();};
 function exactPay(){mode='pay';payAmount=parseFloat(total.textContent).toFixed(2);updateDisplays();updateChange();}
-function cancelOrder(){if(confirm('Bestellung wirklich stornieren?')){for(const k in cart)delete cart[k];payAmount=discountInput='';freeInvoice=false;mode='pay';renderCart();updateDisplays();persist();}}
+function cancelOrder(){
+  if(confirm('Bestellung wirklich stornieren?')){
+    for(const k in cart)delete cart[k];
+    payAmount=discountInput='';freeInvoice=false;mode='pay';
+    renderCart();updateDisplays();persist();
+  }
+}
+
 function checkout(){
   if(mode==='discount')toggleDiscount();
   const totalNum=parseFloat(total.textContent),recv=parseFloat((payAmount||'0').replace(',','.'))||0;
@@ -241,41 +318,64 @@ function checkout(){
   const items=itemList.map(x=>x.quantity+'x '+x.name).join(', ');
   const anzahl=itemList.reduce((s,x)=>s+x.quantity,0);
   const kassierer=document.getElementById('kassSelect').value;
-  const ts=new Date().toLocaleString('de-DE');
-  const entry=new Date().toLocaleTimeString()+' ['+kassierer+'] - '+totalNum.toFixed(2)+' EUR | '+items;
+  const now=new Date();
+  const ts=now.toLocaleString('de-DE');
+  const entry=now.toLocaleTimeString()+' ['+kassierer+'] - '+totalNum.toFixed(2)+' EUR | '+items;
+
+  // Write to Firebase pendingCheckouts so Python can pick it up
+  const checkoutId='co_'+now.getTime();
+  db.ref('pendingCheckouts/'+checkoutId).set({
+    zeitstempel:ts,
+    produkte:items,
+    anzahl_gesamt:anzahl,
+    betrag:totalNum,
+    erhalten:recv,
+    rueckgeld:parseFloat(changeVal),
+    rabatt:freeInvoice?'100%':(discountInput||''),
+    kassierer:kassierer,
+    done:false
+  });
+
   paymentHistory.unshift(entry);updateHistory();
-  for(const k in cart)soldStats[k]=(soldStats[k]||0)+cart[k].quantity;
+  for(const k in cart)soldStats[k.split('::')[1]]=(soldStats[k.split('::')[1]]||0)+cart[k].quantity;
   soldRevenue+=totalNum;
   saveLS();
-  window.parent.postMessage({type:'checkout',zeitstempel:ts,produkte:items,anzahl_gesamt:anzahl,betrag:totalNum,erhalten:recv,rueckgeld:parseFloat(changeVal),rabatt:freeInvoice?'100%':(discountInput||''),kassierer:kassierer},'*');
   document.getElementById('syncStatus').textContent='✅ Gespeichert';
+  setTimeout(()=>{document.getElementById('syncStatus').textContent='';},3000);
   alert('Zahlung erfolgreich!\\n'+entry);
   for(const k in cart)delete cart[k];
   payAmount=discountInput='';freeInvoice=false;renderCart();updateDisplays();persist();
 }
 
 function updateHistory(){
-  // Show live paymentHistory (Firebase + localStorage)
   paymentHistoryEl.innerHTML=paymentHistory.slice(0,8).map(e=>'<div class="history-item">'+e+'</div>').join('');
 }
-
 function onKassChange(){
-  // Show sheet history for newly selected kassierer in history area if live list is empty
   const kass=document.getElementById('kassSelect').value;
   const sheetRows=(SHEET_HISTORY[kass]||[]);
   if(paymentHistory.length===0&&sheetRows.length>0){
-    paymentHistoryEl.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:2px">📄 Aus Sheet (letzte Schicht):</div>'+sheetRows.slice(0,8).map(e=>'<div class="history-item" style="color:#666">'+e+'</div>').join('');
+    paymentHistoryEl.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:2px">📄 Aus Sheet (letzte Eintraege):</div>'+sheetRows.slice(0,8).map(e=>'<div class="history-item" style="color:#666">'+e+'</div>').join('');
   } else {
     updateHistory();
   }
 }
-
-function renderStats(){const pieces=Object.values(soldStats).reduce((s,n)=>s+n,0);statView.textContent='TX: '+paymentHistory.length+'  Stueck: '+pieces+'  '+soldRevenue.toFixed(2)+' EUR';}
-function showStatsWindow(){const w=open('','_blank'),pieces=Object.values(soldStats).reduce((s,n)=>s+n,0);w.document.write('<h2>Umsatzstatistik</h2><table border=1 cellpadding=6>');for(const p in soldStats)w.document.write('<tr><td>'+p+'</td><td>'+soldStats[p]+'</td></tr>');w.document.write('<tr style="font-weight:bold"><td>Summe Stueck</td><td>'+pieces+'</td></tr><tr style="font-weight:bold"><td>Gesamtumsatz</td><td>'+soldRevenue.toFixed(2)+' EUR</td></tr></table>');}
-function showFullHistory(){const w=open('','_blank');w.document.write('<h2>Alle Umsaetze</h2>');paymentHistory.forEach(e=>w.document.write('<div>'+e+'</div>'));}
+function renderStats(){
+  const pieces=Object.values(soldStats).reduce((s,n)=>s+n,0);
+  statView.textContent='TX: '+paymentHistory.length+'  Stueck: '+pieces+'  '+soldRevenue.toFixed(2)+' EUR';
+}
+function showStatsWindow(){
+  const w=open('','_blank'),pieces=Object.values(soldStats).reduce((s,n)=>s+n,0);
+  w.document.write('<h2>Umsatzstatistik</h2><table border=1 cellpadding=6>');
+  for(const p in soldStats)w.document.write('<tr><td>'+p+'</td><td>'+soldStats[p]+'</td></tr>');
+  w.document.write('<tr style="font-weight:bold"><td>Summe Stueck</td><td>'+pieces+'</td></tr><tr style="font-weight:bold"><td>Gesamtumsatz</td><td>'+soldRevenue.toFixed(2)+' EUR</td></tr></table>');
+}
+function showFullHistory(){
+  const w=open('','_blank');
+  w.document.write('<h2>Alle Umsaetze</h2>');
+  paymentHistory.forEach(e=>w.document.write('<div style="padding:3px 0;border-bottom:1px solid #ccc">'+e+'</div>'));
+}
 renderQuantityPad();renderPayPad();renderProducts();renderCart();
-// Show sheet history for default selected kassierer on first load
-setTimeout(()=>{if(paymentHistory.length===0){onKassChange();}},1500);
+setTimeout(()=>{if(paymentHistory.length===0)onKassChange();},1500);
 </script>
 </body>
 </html>"""
@@ -332,6 +432,33 @@ def append_kasse_row(data: dict):
     load_kasse.clear()
 
 
+def get_firebase_pending() -> list[tuple]:
+    """Read pendingCheckouts from Firebase REST API and return list of (key, data)."""
+    import urllib.request
+    url = "https://kasse-thp-default-rtdb.europe-west1.firebasedatabase.app/pendingCheckouts.json"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            raw = json.loads(resp.read().decode())
+        if not raw:
+            return []
+        return [(k, v) for k, v in raw.items() if isinstance(v, dict) and not v.get("done")]
+    except Exception:
+        return []
+
+
+def mark_firebase_done(key: str):
+    """Mark a pendingCheckout as done via Firebase REST PATCH."""
+    import urllib.request
+    url = f"https://kasse-thp-default-rtdb.europe-west1.firebasedatabase.app/pendingCheckouts/{key}.json"
+    data = json.dumps({"done": True}).encode()
+    req = urllib.request.Request(url, data=data, method="PATCH",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass
+
+
 @st.cache_data(ttl=30)
 def load_kasse():
     ws = get_worksheet()
@@ -354,7 +481,6 @@ def load_kasse():
 
 
 def build_sheet_history(df: pd.DataFrame, n: int = 10) -> dict:
-    """Build dict of kassierer -> list of last N history strings from Sheet."""
     result: dict = {}
     if df.empty:
         return result
@@ -382,41 +508,56 @@ st.title("🍺 Touch-Kasse")
 kasse_tab, auswertung_tab = st.tabs(["Kasse", "Auswertung"])
 
 with kasse_tab:
+    # Auto-process pending checkouts from Firebase
+    pending = get_firebase_pending()
+    if pending:
+        saved_count = 0
+        for key, data in pending:
+            try:
+                append_kasse_row(data)
+                mark_firebase_done(key)
+                saved_count += 1
+            except Exception as e:
+                st.warning(f"Fehler beim Speichern von {key}: {e}")
+        if saved_count:
+            st.success(f"✅ {saved_count} Zahlung(en) automatisch ins Sheet gespeichert.")
+            st.rerun()
+
     st.caption("Kassierer waehlen, Produkte antippen, Betrag eingeben, Zahlung abschliessen.")
 
-    with st.form("checkout_form", clear_on_submit=True):
-        st.markdown("**Nach der Zahlung ins Sheet eintragen:**")
-        fc1, fc2, fc3, fc4 = st.columns([2, 1, 3, 1])
-        with fc1:
-            f_kassierer = st.selectbox("Kassierer", ["Freddy","Divin","Chrissi","Jan","Leul","Sohrab","Aldar","Lorena","Anna K.","Michelle","Finn"])
-        with fc2:
-            f_betrag = st.number_input("Betrag (EUR)", min_value=0.0, step=0.5, format="%.2f")
-        with fc3:
-            f_produkte = st.text_input("Produkte", placeholder="2x Bier, 1x Mate, 1x Shot")
-        with fc4:
-            f_rabatt = st.text_input("Rabatt", placeholder="10% oder leer")
-        f_submit = st.form_submit_button("💾 Ins Sheet speichern", type="primary")
+    with st.expander("Manuell ins Sheet eintragen (Notfall)", expanded=False):
+        with st.form("checkout_form", clear_on_submit=True):
+            fc1, fc2, fc3, fc4 = st.columns([2, 1, 3, 1])
+            with fc1:
+                f_kassierer = st.selectbox("Kassierer", ["Freddy","Divin","Chrissi","Jan","Leul","Sohrab","Aldar","Lorena","Anna K.","Michelle","Finn"])
+            with fc2:
+                f_betrag = st.number_input("Betrag (EUR)", min_value=0.0, step=0.5, format="%.2f")
+            with fc3:
+                f_produkte = st.text_input("Produkte", placeholder="2x Bier, 1x Mate, 1x Shot")
+            with fc4:
+                f_rabatt = st.text_input("Rabatt", placeholder="10% oder leer")
+            f_submit = st.form_submit_button("💾 Ins Sheet speichern", type="primary")
 
-    if f_submit and f_betrag > 0:
-        anzahl = 0
-        for teil in f_produkte.split(","):
-            teil = teil.strip()
-            if "x " in teil:
-                try:
-                    anzahl += int(teil.split("x ")[0].strip())
-                except ValueError:
-                    pass
-        append_kasse_row({
-            "kassierer": f_kassierer,
-            "betrag": f_betrag,
-            "erhalten": f_betrag,
-            "rueckgeld": 0,
-            "produkte": f_produkte,
-            "anzahl_gesamt": anzahl,
-            "rabatt": f_rabatt,
-        })
-        st.success(f"✅ {format_euro(f_betrag)} von {f_kassierer} gespeichert.")
-        st.rerun()
+        if f_submit and f_betrag > 0:
+            anzahl = 0
+            for teil in f_produkte.split(","):
+                teil = teil.strip()
+                if "x " in teil:
+                    try:
+                        anzahl += int(teil.split("x ")[0].strip())
+                    except ValueError:
+                        pass
+            append_kasse_row({
+                "kassierer": f_kassierer,
+                "betrag": f_betrag,
+                "erhalten": f_betrag,
+                "rueckgeld": 0,
+                "produkte": f_produkte,
+                "anzahl_gesamt": anzahl,
+                "rabatt": f_rabatt,
+            })
+            st.success(f"✅ {format_euro(f_betrag)} von {f_kassierer} gespeichert.")
+            st.rerun()
 
     # Load sheet history and inject into HTML template
     try:
