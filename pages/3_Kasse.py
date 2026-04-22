@@ -17,37 +17,38 @@ HEADER = ["ID", "Zeitstempel", "Produkte", "Anzahl_Gesamt",
 KASSIERER_LIST = ["Freddy", "Divin", "Chrissi", "Jan", "Leul", "Sohrab",
                   "Aldar", "Lorena", "Anna K.", "Michelle", "Finn"]
 
-PRODUCTS = [
-    {"name": "Bier",            "price": 2.0,  "category": "🍺 Classics",    "color": "#00b894"},
-    {"name": "Aeppler 0,33",    "price": 3.0,  "category": "🍺 Classics",    "color": "#0984e3"},
-    {"name": "+Pfand",          "price": 0.5,  "category": "🍺 Classics",    "color": "#b6b904"},
-    {"name": "Shot",            "price": 1.5,  "category": "🥃 Shots",       "color": "#0984e3"},
-    {"name": "Surprise Shot",   "price": 0.5,  "category": "🥃 Shots",       "color": "#6c5ce7"},
-    {"name": "Happy Hour Shot", "price": 1.0,  "category": "🥃 Shots",       "color": "#00cec9"},
-    {"name": "Spezi",           "price": 2.0,  "category": "🧃 alkoholfrei", "color": "#00b894"},
-    {"name": "Mate",            "price": 3.0,  "category": "🧃 alkoholfrei", "color": "#00b894"},
-    {"name": "+Pfand",          "price": 0.5,  "category": "🧃 alkoholfrei", "color": "#b6b904"},
-    {"name": "Limo 0,33",       "price": 1.5,  "category": "🧃 alkoholfrei", "color": "#0984e3"},
-    {"name": "Red Bull",        "price": 3.0,  "category": "🧃 alkoholfrei", "color": "#0984e3"},
-    {"name": "Sekt Mate",       "price": 4.0,  "category": "🍹 Mischen",     "color": "#00b894"},
-    {"name": "Vodka Mate",      "price": 4.0,  "category": "🍹 Mischen",     "color": "#00b894"},
-    {"name": "+Pfand",          "price": 0.5,  "category": "🍹 Mischen",     "color": "#b6b904"},
-    {"name": "Koks Mische",     "price": 5.0,  "category": "🍹 Mischen",     "color": "#0984e3"},
-    {"name": "Flasche Pfeffi",  "price": 15.0, "category": "⭐ Specials",    "color": "#6c5ce7"},
-    {"name": "Golfclub",        "price": 15.0, "category": "⭐ Specials",    "color": "#6c5ce7"},
-    {"name": "ACAB",            "price": 110.0,"category": "⭐ Specials",    "color": "#d63031"},
-    {"name": "Bierpong",        "price": 15.0, "category": "⭐ Specials",    "color": "#6c5ce7"},
-    {"name": "Mischkonsum",     "price": 15.0, "category": "⭐ Specials",    "color": "#6c5ce7"},
-    {"name": "Schmeisse Runde", "price": 16.0, "category": "⭐ Specials",    "color": "#e17055"},
-]
-
-PRODUCT_ICONS = {
-    "Bier": "🍺", "Aeppler 0,33": "🍏", "+Pfand": "♻️", "Shot": "🥃",
-    "Surprise Shot": "🎲", "Happy Hour Shot": "⏰", "Spezi": "🥤", "Mate": "🧉",
-    "Limo 0,33": "🍋", "Red Bull": "🐂", "Sekt Mate": "🥂", "Vodka Mate": "🍸",
-    "Koks Mische": "🥃", "Flasche Pfeffi": "🌿", "Golfclub": "⛳", "ACAB": "🚨",
-    "Bierpong": "🏓", "Mischkonsum": "🍹", "Schmeisse Runde": "🎉",
+# Farben pro Kategorie
+CAT_COLOR = {
+    "Classics":    "#00b894",
+    "Shots":       "#e17055",
+    "alkoholfrei": "#0984e3",
+    "Mischen":     "#6c5ce7",
+    "Specials":    "#fdcb6e",
 }
+
+PRODUCTS = [
+    {"name": "Bier",            "price": 2.0,  "cat": "Classics"},
+    {"name": "Aeppler 0,33",    "price": 3.0,  "cat": "Classics"},
+    {"name": "+Pfand",          "price": 0.5,  "cat": "Classics"},
+    {"name": "Shot",            "price": 1.5,  "cat": "Shots"},
+    {"name": "Surprise Shot",   "price": 0.5,  "cat": "Shots"},
+    {"name": "Happy Hour Shot", "price": 1.0,  "cat": "Shots"},
+    {"name": "Spezi",           "price": 2.0,  "cat": "alkoholfrei"},
+    {"name": "Mate",            "price": 3.0,  "cat": "alkoholfrei"},
+    {"name": "+Pfand",          "price": 0.5,  "cat": "alkoholfrei"},
+    {"name": "Limo 0,33",       "price": 1.5,  "cat": "alkoholfrei"},
+    {"name": "Red Bull",        "price": 3.0,  "cat": "alkoholfrei"},
+    {"name": "Sekt Mate",       "price": 4.0,  "cat": "Mischen"},
+    {"name": "Vodka Mate",      "price": 4.0,  "cat": "Mischen"},
+    {"name": "+Pfand",          "price": 0.5,  "cat": "Mischen"},
+    {"name": "Koks Mische",     "price": 5.0,  "cat": "Mischen"},
+    {"name": "Flasche Pfeffi",  "price": 15.0, "cat": "Specials"},
+    {"name": "Golfclub",        "price": 15.0, "cat": "Specials"},
+    {"name": "ACAB",            "price": 110.0,"cat": "Specials"},
+    {"name": "Bierpong",        "price": 15.0, "cat": "Specials"},
+    {"name": "Mischkonsum",     "price": 15.0, "cat": "Specials"},
+    {"name": "Schmeisse Runde", "price": 16.0, "cat": "Specials"},
+]
 
 SERVICE_ACCOUNT_CANDIDATES = [
     Path("service_account.json"),
@@ -56,7 +57,7 @@ SERVICE_ACCOUNT_CANDIDATES = [
 ]
 
 
-# ── Google Sheets ────────────────────────────────────────────────────────────
+# ── Google Sheets ─────────────────────────────────────────────────────────────
 
 def get_gspread_client():
     try:
@@ -74,7 +75,7 @@ def get_gspread_client():
             credentials = json.loads(candidate.read_text(encoding="utf-8").strip())
             return gspread.service_account_from_dict(credentials)
         except Exception as exc:
-            st.warning(f"Anmeldedatei konnte nicht genutzt werden: {candidate} ({exc})")
+            st.warning(f"Anmeldedatei: {candidate} ({exc})")
     raise FileNotFoundError("Keine Google-Service-Account-Datei gefunden.")
 
 
@@ -136,18 +137,17 @@ def format_euro(v):
     return f"{v:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-# ── Session state helpers ────────────────────────────────────────────────────
+# ── Session state ─────────────────────────────────────────────────────────────
 
 def init_state():
-    defaults = {
-        "cart": {},           # key -> {name, price, category, quantity}
-        "pay_amount": "",     # string being typed on numpad
-        "discount": "",       # discount string e.g. "10%" or "2.50"
-        "free": False,        # gratis toggle
-        "history": [],        # list of display strings
-        "quantity": 1,        # selected quantity multiplier
-    }
-    for k, v in defaults.items():
+    for k, v in {
+        "cart": {},
+        "pay_amount": "",
+        "discount": "",
+        "free": False,
+        "history": [],
+        "quantity": 1,
+    }.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
@@ -158,25 +158,25 @@ def cart_total_base() -> float:
 
 def cart_total() -> float:
     base = cart_total_base()
-    disc = st.session_state.discount
     if st.session_state.free:
         return 0.0
+    disc = st.session_state.discount
     if disc:
         if disc.endswith("%"):
             pct = float(disc[:-1] or 0) / 100
             return max(0.0, base - base * pct)
-        else:
-            try:
-                return max(0.0, base - float(disc.replace(",", ".")))
-            except ValueError:
-                return base
+        try:
+            return max(0.0, base - float(disc.replace(",", ".")))
+        except ValueError:
+            pass
     return base
 
 
-def add_to_cart(product: dict):
-    key = product["category"] + "::" + product["name"]
+def add_to_cart(idx: int):
+    p = PRODUCTS[idx]
+    key = f"{p['cat']}::{p['name']}"
     if key not in st.session_state.cart:
-        st.session_state.cart[key] = {**product, "quantity": 0}
+        st.session_state.cart[key] = {**p, "quantity": 0}
     st.session_state.cart[key]["quantity"] += st.session_state.quantity
     st.session_state.quantity = 1
 
@@ -191,263 +191,194 @@ def numpad_press(val: str):
         st.session_state.pay_amount = cur + val
 
 
-# ── Page setup ───────────────────────────────────────────────────────────────
+# ── HTML helpers ──────────────────────────────────────────────────────────────
+
+def product_grid_html() -> str:
+    cats: dict = {}
+    for i, p in enumerate(PRODUCTS):
+        cats.setdefault(p["cat"], []).append((i, p))
+
+    cat_icons = {"Classics": "🍺", "Shots": "🥃", "alkoholfrei": "🧃", "Mischen": "🍹", "Specials": "⭐"}
+
+    html = ""
+    for cat, items in cats.items():
+        color = CAT_COLOR[cat]
+        # dark text for bright yellow (Specials), white for others
+        text_color = "#1a1d27" if cat == "Specials" else "#fff"
+        html += f"<div style='font-size:11px;font-weight:700;letter-spacing:1px;color:{color};margin:10px 0 5px;text-transform:uppercase'>{cat_icons.get(cat,'')} {cat}</div>"
+        html += "<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:6px'>"
+        for i, p in items:
+            html += (
+                f"<a href='?add={i}' style='text-decoration:none'>"
+                f"<div style='background:{color};color:{text_color};border-radius:8px;"
+                f"padding:10px 8px;font-size:13px;font-weight:600;text-align:center;"
+                f"min-height:54px;display:flex;flex-direction:column;justify-content:center;"
+                f"align-items:center;gap:2px;cursor:pointer;transition:filter .15s'>"
+                f"<span>{p['name']}</span>"
+                f"<span style='font-size:12px;opacity:.85'>{p['price']:.2f} €</span>"
+                f"</div></a>"
+            )
+        html += "</div>"
+    return html
+
+
+# ── Page ──────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="THP - Kasse", page_icon="🍺", layout="wide")
 init_state()
 
+# Handle product click via query param
+qp = st.query_params
+if "add" in qp:
+    try:
+        add_to_cart(int(qp["add"]))
+    except (ValueError, IndexError):
+        pass
+    st.query_params.clear()
+    st.rerun()
+
 st.markdown("""
 <style>
-/* ── Global ── */
 [data-testid="stAppViewContainer"] { background: #0f1117; }
 [data-testid="stSidebar"] { background: #1a1d27; }
-
-/* ── Alle Columns: kein Gap ── */
-[data-testid="stHorizontalBlock"] { gap: 6px !important; }
+[data-testid="stHorizontalBlock"] { gap: 5px !important; }
 [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { padding: 0 !important; }
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > div { margin-bottom: 6px !important; }
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"] > div { margin-bottom: 5px !important; }
 
-/* ── Produkt-Buttons: farbige Kacheln ── */
-.prod-btn button {
+/* Alle st.button gleich groß */
+button[kind="secondary"], button[kind="primary"] {
     width: 100% !important;
-    height: 54px !important;
-    min-height: 54px !important;
-    font-size: 13px !important;
-    font-weight: 600 !important;
-    padding: 0 6px !important;
-    border-radius: 8px !important;
-    border: none !important;
-    background: #1e2130 !important;
-    color: #e0e0e0 !important;
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    transition: background 0.15s !important;
-}
-.prod-btn button:hover { filter: brightness(1.2) !important; }
-
-/* ── Numpad-Buttons ── */
-.numpad button {
-    width: 100% !important;
-    height: 52px !important;
-    min-height: 52px !important;
-    font-size: 18px !important;
-    font-weight: 700 !important;
-    border-radius: 8px !important;
-    background: #1e2130 !important;
-    color: #fff !important;
-    border: 1px solid #2d3148 !important;
-}
-.numpad button:hover { background: #2a2f45 !important; }
-
-/* ── Quantity-Buttons ── */
-.qty-btn button {
-    height: 38px !important;
-    min-height: 38px !important;
-    font-size: 14px !important;
-    font-weight: 700 !important;
-    border-radius: 6px !important;
-    background: #1e2130 !important;
-    color: #aaa !important;
-    border: 1px solid #2d3148 !important;
-    padding: 0 !important;
-}
-
-/* ── Action-Buttons ── */
-.action-btn button {
-    height: 46px !important;
-    min-height: 46px !important;
+    height: 48px !important;
+    min-height: 48px !important;
+    max-height: 48px !important;
     font-size: 14px !important;
     font-weight: 600 !important;
+    padding: 0 8px !important;
     border-radius: 8px !important;
 }
-
-/* ── Checkout/Cancel ── */
-.checkout-btn button {
+/* Numpad größer */
+.numpad-row button[kind="secondary"] {
     height: 56px !important;
     min-height: 56px !important;
-    font-size: 16px !important;
+    max-height: 56px !important;
+    font-size: 20px !important;
     font-weight: 700 !important;
-    border-radius: 10px !important;
 }
-
-/* ── Warenkorb-Box ── */
-.cart-box {
-    background: #1a1d27;
-    border-radius: 10px;
-    padding: 12px 14px;
-    margin-bottom: 10px;
-    min-height: 80px;
+/* Checkout-Button */
+.checkout-row button[kind="primary"] {
+    height: 60px !important;
+    min-height: 60px !important;
+    max-height: 60px !important;
+    font-size: 17px !important;
+    font-weight: 700 !important;
+    background: #00b894 !important;
+    border-color: #00b894 !important;
 }
-.cart-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 0;
-    border-bottom: 1px solid #2d3148;
-    font-size: 14px;
-    color: #e0e0e0;
+.cancel-row button[kind="secondary"] {
+    height: 60px !important;
+    min-height: 60px !important;
+    max-height: 60px !important;
+    font-size: 15px !important;
 }
-.cart-row:last-child { border-bottom: none; }
-.cart-empty { color: #555; font-style: italic; font-size: 14px; text-align: center; padding: 16px 0; }
-
-/* ── Totals-Box ── */
-.totals-box {
-    background: #1a1d27;
-    border-radius: 10px;
-    padding: 12px 14px;
-    margin: 8px 0;
-    border: 1px solid #2d3148;
-}
-.totals-box .total-line {
-    display: flex;
-    justify-content: space-between;
-    font-size: 14px;
-    color: #aaa;
-    padding: 2px 0;
-}
-.totals-box .total-main {
-    display: flex;
-    justify-content: space-between;
-    font-size: 22px;
-    font-weight: 700;
-    color: #fff;
-    padding: 6px 0 2px;
-}
-.totals-box .change-pos { color: #00b894 !important; }
-.totals-box .change-neg { color: #d63031 !important; }
-
-/* ── Kategorie-Label ── */
-.cat-label {
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: #666;
-    margin: 10px 0 4px;
-}
-
-/* ── Kassierer-Bar ── */
-.kass-bar {
-    background: #1d4ed8;
-    border-radius: 10px;
-    padding: 10px 16px;
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    color: white;
-    font-weight: 600;
+/* Qty-Buttons klein */
+.qty-row button {
+    height: 36px !important;
+    min-height: 36px !important;
+    max-height: 36px !important;
+    font-size: 13px !important;
+    padding: 0 !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h2 style='margin-bottom:4px'>🍺 Touch-Kasse</h2>", unsafe_allow_html=True)
+st.markdown("<h2 style='margin-bottom:8px'>🍺 Touch-Kasse</h2>", unsafe_allow_html=True)
 
 kasse_tab, auswertung_tab = st.tabs(["Kasse", "Auswertung"])
 
-# ── KASSE TAB ────────────────────────────────────────────────────────────────
 with kasse_tab:
 
-    # ── Kassierer-Bar + Anzahl ───────────────────────────────────────────────
-    bar1, bar2 = st.columns([2, 5])
-    with bar1:
-        kassierer = st.selectbox("Kassierer", KASSIERER_LIST, key="kassierer",
-                                 label_visibility="collapsed")
-        st.markdown(f"<div style='color:#666;font-size:12px;margin-top:-8px'>Kassierer: <b style='color:#1d4ed8'>{kassierer}</b></div>", unsafe_allow_html=True)
-    with bar2:
-        st.markdown("<div style='color:#888;font-size:12px;margin-bottom:2px'>ANZAHL</div>", unsafe_allow_html=True)
+    # Top bar
+    t1, t2 = st.columns([2, 6])
+    with t1:
+        kassierer = st.selectbox("Kassierer", KASSIERER_LIST, key="kassierer", label_visibility="collapsed")
+        st.markdown(f"<div style='color:#1d4ed8;font-size:12px;font-weight:700;margin-top:-6px'>👤 {kassierer}</div>", unsafe_allow_html=True)
+    with t2:
+        st.markdown("<div style='color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:3px'>Anzahl</div>", unsafe_allow_html=True)
+        st.markdown('<div class="qty-row">', unsafe_allow_html=True)
         qcols = st.columns(11)
         for i, q in enumerate(range(1, 11)):
-            with qcols[i]:
-                st.markdown('<div class="qty-btn">', unsafe_allow_html=True)
-                active = st.session_state.quantity == q
-                if st.button(str(q), key=f"q_{q}", use_container_width=True,
-                             type="primary" if active else "secondary"):
-                    st.session_state.quantity = q
-                    st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-        with qcols[10]:
-            st.markdown('<div class="qty-btn">', unsafe_allow_html=True)
-            if st.button("C", key="q_c", use_container_width=True):
-                st.session_state.quantity = 1
+            if qcols[i].button(str(q), key=f"q_{q}", use_container_width=True,
+                               type="primary" if st.session_state.quantity == q else "secondary"):
+                st.session_state.quantity = q
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+        if qcols[10].button("✕", key="q_c", use_container_width=True):
+            st.session_state.quantity = 1
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown(f"<div style='color:#1d4ed8;font-size:12px;font-weight:700;margin-top:-4px'>{st.session_state.quantity}x ausgewählt</div>", unsafe_allow_html=True)
 
-    st.markdown(f"<div style='font-size:13px;color:#1d4ed8;font-weight:700;margin:-4px 0 8px'>Anzahl: {st.session_state.quantity}x</div>", unsafe_allow_html=True)
-    st.divider()
+    st.markdown("<hr style='border-color:#2d3148;margin:10px 0'>", unsafe_allow_html=True)
 
-    # ── Produkte links | Kasse rechts ───────────────────────────────────────
     prod_col, cart_col = st.columns([3, 2], gap="large")
 
+    # ── Produktgitter als HTML ────────────────────────────────────────────────
     with prod_col:
-        categories: dict = {}
-        for p in PRODUCTS:
-            categories.setdefault(p["category"], []).append(p)
+        st.markdown(product_grid_html(), unsafe_allow_html=True)
 
-        for cat, items in categories.items():
-            st.markdown(f"<div class='cat-label'>{cat}</div>", unsafe_allow_html=True)
-            cols = st.columns(3)
-            for idx, p in enumerate(items):
-                with cols[idx % 3]:
-                    st.markdown('<div class="prod-btn">', unsafe_allow_html=True)
-                    label = f"{p['name']}\n{p['price']:.2f} €"
-                    if st.button(label, key=f"prod_{cat}_{p['name']}_{idx}", use_container_width=True):
-                        add_to_cart(p)
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-
+    # ── Kassenansicht ─────────────────────────────────────────────────────────
     with cart_col:
-        # ── Warenkorb ───────────────────────────────────────────────────────
-        st.markdown("<div style='font-size:16px;font-weight:700;color:#fff;margin-bottom:6px'>Warenkorb</div>", unsafe_allow_html=True)
 
+        # Warenkorb-Anzeige
+        st.markdown("<div style='font-size:15px;font-weight:700;color:#fff;margin-bottom:6px'>Warenkorb</div>", unsafe_allow_html=True)
+        cart_html = "<div style='background:#1a1d27;border-radius:10px;padding:10px 14px;margin-bottom:8px;min-height:60px'>"
         if not st.session_state.cart:
-            st.markdown("<div class='cart-box'><div class='cart-empty'>Warenkorb leer</div></div>", unsafe_allow_html=True)
+            cart_html += "<div style='color:#555;font-style:italic;font-size:13px;padding:8px 0'>Warenkorb leer</div>"
         else:
-            cart_html = "<div class='cart-box'>"
             for item in st.session_state.cart.values():
-                cart_html += f"<div class='cart-row'><span>{item['quantity']}x {item['name']}</span><span style='color:#fff;font-weight:600'>{item['quantity']*item['price']:.2f} €</span></div>"
-            cart_html += "</div>"
-            st.markdown(cart_html, unsafe_allow_html=True)
+                color = CAT_COLOR.get(item["cat"], "#aaa")
+                cart_html += (
+                    f"<div style='display:flex;justify-content:space-between;padding:5px 0;"
+                    f"border-bottom:1px solid #2d3148;font-size:13px'>"
+                    f"<span><span style='color:{color};font-weight:700'>{item['quantity']}×</span> {item['name']}</span>"
+                    f"<span style='color:#fff;font-weight:600'>{item['quantity']*item['price']:.2f} €</span>"
+                    f"</div>"
+                )
+        cart_html += "</div>"
+        st.markdown(cart_html, unsafe_allow_html=True)
 
-            # +/- buttons per cart item
+        # Warenkorb +/- Buttons
+        if st.session_state.cart:
             for key, item in list(st.session_state.cart.items()):
-                c1, c2, c3 = st.columns([4, 1, 1])
-                c1.markdown(f"<div style='font-size:13px;padding-top:6px;color:#aaa'>{item['name']}</div>", unsafe_allow_html=True)
-                if c2.button("+", key=f"plus_{key}", use_container_width=True):
+                c1, c2, c3 = st.columns([5, 1, 1])
+                c1.markdown(f"<div style='font-size:12px;color:#888;padding-top:8px'>{item['name']}</div>", unsafe_allow_html=True)
+                if c2.button("+", key=f"p_{key}", use_container_width=True):
                     st.session_state.cart[key]["quantity"] += 1
                     st.rerun()
-                if c3.button("−", key=f"minus_{key}", use_container_width=True):
+                if c3.button("−", key=f"m_{key}", use_container_width=True):
                     st.session_state.cart[key]["quantity"] -= 1
                     if st.session_state.cart[key]["quantity"] <= 0:
                         del st.session_state.cart[key]
                     st.rerun()
 
-        # ── Aktionen ────────────────────────────────────────────────────────
-        ac1, ac2 = st.columns(2)
-        with ac1:
-            st.markdown('<div class="action-btn">', unsafe_allow_html=True)
-            if st.button("Gratis" if not st.session_state.free else "Gratis ✓",
-                         type="primary" if st.session_state.free else "secondary",
-                         use_container_width=True):
-                st.session_state.free = not st.session_state.free
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-        with ac2:
-            st.markdown('<div class="action-btn">', unsafe_allow_html=True)
-            if st.button("Leeren", use_container_width=True):
-                st.session_state.cart = {}
-                st.session_state.discount = ""
-                st.session_state.free = False
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Aktionszeile
+        a1, a2 = st.columns(2)
+        if a1.button("Gratis" if not st.session_state.free else "Gratis ✓",
+                     type="primary" if st.session_state.free else "secondary",
+                     use_container_width=True):
+            st.session_state.free = not st.session_state.free
+            st.rerun()
+        if a2.button("Leeren", use_container_width=True):
+            st.session_state.cart = {}
+            st.session_state.discount = ""
+            st.session_state.free = False
+            st.rerun()
 
         new_disc = st.text_input("Rabatt", value=st.session_state.discount, key="disc_input",
                                  label_visibility="collapsed", placeholder="Rabatt: 10% oder 2.50 EUR")
         if new_disc != st.session_state.discount:
             st.session_state.discount = new_disc
 
-        # ── Totals ──────────────────────────────────────────────────────────
+        # Totals-Box
         base = cart_total_base()
         total = cart_total()
         try:
@@ -455,69 +386,64 @@ with kasse_tab:
         except ValueError:
             pay_val = 0.0
         change = pay_val - total
-        change_class = "change-pos" if change >= 0 else "change-neg"
-        disc_line = ""
+        chg_color = "#00b894" if change >= 0 else "#d63031"
+        disc_html = ""
         if st.session_state.free:
-            disc_line = "<div class='total-line'><span>Rabatt</span><span style='color:#e17055'>100% (Gratis)</span></div>"
+            disc_html = "<div style='display:flex;justify-content:space-between;font-size:13px;color:#e17055;padding:2px 0'><span>Rabatt</span><span>100% Gratis</span></div>"
         elif st.session_state.discount:
-            disc_line = f"<div class='total-line'><span>Rabatt</span><span style='color:#e17055'>{st.session_state.discount}</span></div>"
+            disc_html = f"<div style='display:flex;justify-content:space-between;font-size:13px;color:#e17055;padding:2px 0'><span>Rabatt</span><span>{st.session_state.discount}</span></div>"
 
         st.markdown(f"""
-        <div class='totals-box'>
-          <div class='total-line'><span>Summe</span><span>{base:.2f} €</span></div>
-          {disc_line}
-          <div class='total-main'><span>Gesamt</span><span>{total:.2f} €</span></div>
-          <div class='total-line'><span>Erhalten</span><span>{pay_val:.2f} €</span></div>
-          <div class='total-line'><span>Rückgeld</span><span class='{change_class}'><b>{change:.2f} €</b></span></div>
+        <div style='background:#1a1d27;border-radius:10px;padding:12px 14px;margin:6px 0;border:1px solid #2d3148'>
+          <div style='display:flex;justify-content:space-between;font-size:13px;color:#888;padding:2px 0'><span>Summe</span><span>{base:.2f} €</span></div>
+          {disc_html}
+          <div style='display:flex;justify-content:space-between;font-size:24px;font-weight:700;color:#fff;padding:6px 0 4px'><span>Gesamt</span><span>{total:.2f} €</span></div>
+          <div style='display:flex;justify-content:space-between;font-size:13px;color:#888;padding:2px 0'><span>Erhalten</span><span>{pay_val:.2f} €</span></div>
+          <div style='display:flex;justify-content:space-between;font-size:16px;font-weight:700;color:{chg_color};padding:2px 0'><span>Rückgeld</span><span>{change:.2f} €</span></div>
         </div>
         """, unsafe_allow_html=True)
 
-        # ── Schnellzahlung ───────────────────────────────────────────────────
-        st.markdown("<div style='color:#888;font-size:11px;margin:4px 0 2px'>SCHNELLZAHLUNG</div>", unsafe_allow_html=True)
-        qp_cols = st.columns(4)
+        # Schnellzahlung
+        st.markdown("<div style='color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin:6px 0 3px'>Schnellzahlung</div>", unsafe_allow_html=True)
+        qp2 = st.columns(4)
         for i, amt in enumerate([5, 10, 20, 50]):
-            if qp_cols[i].button(f"{amt} €", key=f"qp_{amt}", use_container_width=True):
+            if qp2[i].button(f"{amt} €", key=f"qp_{amt}", use_container_width=True):
                 st.session_state.pay_amount = str(amt)
                 st.rerun()
 
-        # ── Numpad ──────────────────────────────────────────────────────────
-        st.markdown("<div style='color:#888;font-size:11px;margin:6px 0 2px'>BETRAG EINGEBEN</div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='font-size:28px;font-weight:700;color:#fff;background:#1a1d27;border-radius:8px;padding:10px 14px;margin-bottom:6px;text-align:right'>{st.session_state.pay_amount or '0'} €</div>", unsafe_allow_html=True)
-
-        pad_rows = [["7","8","9"], ["4","5","6"], ["1","2","3"], ["0",".","<"]]
-        for row in pad_rows:
+        # Numpad
+        st.markdown("<div style='color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin:8px 0 3px'>Betrag eingeben</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='font-size:30px;font-weight:700;color:#fff;background:#1a1d27;"
+            f"border-radius:8px;padding:10px 14px;margin-bottom:6px;text-align:right;"
+            f"border:1px solid #2d3148'>{st.session_state.pay_amount or '0'} €</div>",
+            unsafe_allow_html=True
+        )
+        for row in [["7","8","9"], ["4","5","6"], ["1","2","3"], ["0",".","<"]]:
+            st.markdown('<div class="numpad-row">', unsafe_allow_html=True)
             rcols = st.columns(3)
             for i, val in enumerate(row):
-                with rcols[i]:
-                    st.markdown('<div class="numpad">', unsafe_allow_html=True)
-                    if st.button(val, key=f"pad_{val}_{row}", use_container_width=True):
-                        numpad_press("⌫" if val == "<" else val)
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-        pc1, pc2 = st.columns(2)
-        with pc1:
-            st.markdown('<div class="numpad">', unsafe_allow_html=True)
-            if st.button("C", key="pad_C", use_container_width=True):
-                numpad_press("C")
-                st.rerun()
+                if rcols[i].button(val, key=f"np_{val}_{row[0]}", use_container_width=True):
+                    numpad_press("⌫" if val == "<" else val)
+                    st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
-        with pc2:
-            if st.button("Passend", key="pad_passend", use_container_width=True):
-                st.session_state.pay_amount = f"{total:.2f}"
-                st.rerun()
 
-        # ── Checkout ────────────────────────────────────────────────────────
-        st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+        bot1, bot2 = st.columns(2)
+        if bot1.button("C  (löschen)", key="np_C", use_container_width=True):
+            numpad_press("C")
+            st.rerun()
+        if bot2.button("Passend", key="np_passend", use_container_width=True):
+            st.session_state.pay_amount = f"{total:.2f}"
+            st.rerun()
+
+        # Checkout
+        st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
         ch1, ch2 = st.columns([3, 2])
-        with ch1:
-            st.markdown('<div class="checkout-btn">', unsafe_allow_html=True)
-            checkout_clicked = st.button("Zahlung abschliessen", type="primary", use_container_width=True, key="checkout")
-            st.markdown('</div>', unsafe_allow_html=True)
-        with ch2:
-            st.markdown('<div class="checkout-btn">', unsafe_allow_html=True)
-            cancel_clicked = st.button("Stornieren", use_container_width=True, key="cancel")
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="checkout-row">', unsafe_allow_html=True)
+        checkout_clicked = ch1.button("Zahlung abschliessen", type="primary", use_container_width=True, key="checkout")
+        st.markdown('</div><div class="cancel-row">', unsafe_allow_html=True)
+        cancel_clicked = ch2.button("Stornieren", use_container_width=True, key="cancel")
+        st.markdown('</div>', unsafe_allow_html=True)
 
         if cancel_clicked:
             st.session_state.cart = {}
@@ -558,34 +484,33 @@ with kasse_tab:
                 st.session_state.free = False
                 st.rerun()
 
-        # ── History ─────────────────────────────────────────────────────────
+        # History
         if st.session_state.history:
-            st.markdown("<div style='margin-top:12px;color:#888;font-size:11px'>LETZTE TRANSAKTIONEN</div>", unsafe_allow_html=True)
-            for entry in st.session_state.history[:5]:
-                st.markdown(f"<div style='font-size:12px;color:#aaa;padding:3px 0;border-bottom:1px solid #2d3148'>{entry}</div>", unsafe_allow_html=True)
+            st.markdown("<div style='margin-top:12px;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase'>Letzte Transaktionen</div>", unsafe_allow_html=True)
+            for e in st.session_state.history[:5]:
+                st.markdown(f"<div style='font-size:12px;color:#888;padding:3px 0;border-bottom:1px solid #2d3148'>{e}</div>", unsafe_allow_html=True)
 
         try:
             df_hist = load_kasse()
-            if not df_hist.empty:
-                kass_hist = df_hist[df_hist["Kassierer"] == kassierer].dropna(subset=["Zeitstempel"])
-                kass_hist = kass_hist.sort_values("Zeitstempel", ascending=False).head(5)
-                if not kass_hist.empty and not st.session_state.history:
-                    st.markdown("<div style='margin-top:12px;color:#888;font-size:11px'>AUS SHEET</div>", unsafe_allow_html=True)
-                    for _, row in kass_hist.iterrows():
+            if not df_hist.empty and not st.session_state.history:
+                kh = df_hist[df_hist["Kassierer"] == kassierer].dropna(subset=["Zeitstempel"])
+                kh = kh.sort_values("Zeitstempel", ascending=False).head(5)
+                if not kh.empty:
+                    st.markdown("<div style='margin-top:10px;color:#666;font-size:11px;letter-spacing:1px;text-transform:uppercase'>Aus Sheet</div>", unsafe_allow_html=True)
+                    for _, row in kh.iterrows():
                         ts = row["Zeitstempel"].strftime("%d.%m %H:%M")
-                        st.markdown(f"<div style='font-size:12px;color:#666;padding:3px 0'>{ts} — {row['Betrag_Gesamt']:.2f} € | {row['Produkte']}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='font-size:12px;color:#555;padding:3px 0'>{ts} — {row['Betrag_Gesamt']:.2f} € | {row['Produkte']}</div>", unsafe_allow_html=True)
         except Exception:
             pass
 
 
-# ── AUSWERTUNG TAB ───────────────────────────────────────────────────────────
+# ── AUSWERTUNG TAB ────────────────────────────────────────────────────────────
 with auswertung_tab:
-    if st.button("🔄 Daten neu laden"):
+    if st.button("Daten neu laden"):
         load_kasse.clear()
         st.rerun()
 
     df = load_kasse()
-
     if df.empty:
         st.info("Noch keine Kassendaten vorhanden.")
         st.stop()
@@ -603,25 +528,21 @@ with auswertung_tab:
 
     st.markdown("---")
     col1, col2 = st.columns(2)
-
     with col1:
         st.markdown("### Umsatz pro Transaktion")
         time_df = df.dropna(subset=["Zeitstempel"]).sort_values("Zeitstempel")
         if not time_df.empty:
             fig = px.bar(time_df, x="Zeitstempel", y="Betrag_Gesamt", color="Kassierer",
                          labels={"Betrag_Gesamt": "Betrag (EUR)", "Zeitstempel": "Zeit"}, height=300)
-            fig.update_layout(margin={"l": 10, "r": 10, "t": 10, "b": 10})
+            fig.update_layout(margin={"l":10,"r":10,"t":10,"b":10})
             st.plotly_chart(fig, use_container_width=True)
-
     with col2:
         st.markdown("### Umsatz pro Kassierer")
-        kass_df = (df.groupby("Kassierer")["Betrag_Gesamt"].sum()
-                   .reset_index().sort_values("Betrag_Gesamt", ascending=False))
-        fig2 = go.Figure(go.Bar(
-            x=kass_df["Kassierer"], y=kass_df["Betrag_Gesamt"],
-            text=[format_euro(v) for v in kass_df["Betrag_Gesamt"]],
-            textposition="outside", marker_color="#1d4ed8"))
-        fig2.update_layout(height=300, margin={"l": 10, "r": 10, "t": 10, "b": 10}, yaxis_title="EUR")
+        kass_df = df.groupby("Kassierer")["Betrag_Gesamt"].sum().reset_index().sort_values("Betrag_Gesamt", ascending=False)
+        fig2 = go.Figure(go.Bar(x=kass_df["Kassierer"], y=kass_df["Betrag_Gesamt"],
+                                text=[format_euro(v) for v in kass_df["Betrag_Gesamt"]],
+                                textposition="outside", marker_color="#1d4ed8"))
+        fig2.update_layout(height=300, margin={"l":10,"r":10,"t":10,"b":10}, yaxis_title="EUR")
         st.plotly_chart(fig2, use_container_width=True)
 
     st.markdown("### Meistverkaufte Produkte")
@@ -636,21 +557,16 @@ with auswertung_tab:
                 product_counts[name.strip()] = product_counts.get(name.strip(), 0) + int(menge.strip())
             except ValueError:
                 continue
-
     if product_counts:
-        prod_df = pd.DataFrame(
-            sorted(product_counts.items(), key=lambda x: x[1], reverse=True),
-            columns=["Produkt", "Stueck"])
-        fig3 = go.Figure(go.Bar(
-            x=prod_df["Produkt"], y=prod_df["Stueck"],
-            text=prod_df["Stueck"], textposition="outside", marker_color="#16a34a"))
-        fig3.update_layout(height=340, margin={"l": 10, "r": 10, "t": 10, "b": 10}, yaxis_title="Stueck")
+        prod_df = pd.DataFrame(sorted(product_counts.items(), key=lambda x: x[1], reverse=True), columns=["Produkt", "Stueck"])
+        fig3 = go.Figure(go.Bar(x=prod_df["Produkt"], y=prod_df["Stueck"],
+                                text=prod_df["Stueck"], textposition="outside", marker_color="#16a34a"))
+        fig3.update_layout(height=340, margin={"l":10,"r":10,"t":10,"b":10}, yaxis_title="Stueck")
         st.plotly_chart(fig3, use_container_width=True)
 
     with st.expander("Alle Buchungen", expanded=False):
         display = df.copy()
         display["Zeitstempel"] = display["Zeitstempel"].dt.strftime("%d.%m.%Y %H:%M").fillna("-")
         display["Betrag_Gesamt"] = display["Betrag_Gesamt"].map(format_euro)
-        st.dataframe(
-            display[["Zeitstempel", "Kassierer", "Produkte", "Anzahl_Gesamt", "Betrag_Gesamt", "Rabatt"]],
-            use_container_width=True, hide_index=True)
+        st.dataframe(display[["Zeitstempel","Kassierer","Produkte","Anzahl_Gesamt","Betrag_Gesamt","Rabatt"]],
+                     use_container_width=True, hide_index=True)
