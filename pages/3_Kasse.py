@@ -250,8 +250,7 @@ with kasse_tab:
             st.markdown(f"**{cat}**")
             cols = st.columns(3)
             for idx, p in enumerate(items):
-                icon = PRODUCT_ICONS.get(p["name"], "")
-                label = f"{icon} {p['name']}\n{p['price']:.2f} EUR"
+                label = f"{p['name']} — {p['price']:.2f} €"
                 if cols[idx % 3].button(label, key=f"prod_{cat}_{p['name']}_{idx}"):
                     add_to_cart(p)
                     st.rerun()
@@ -323,21 +322,21 @@ with kasse_tab:
         # Quick pay buttons
         qp_cols = st.columns(4)
         for i, amt in enumerate([5, 10, 20, 50]):
-            if qp_cols[i].button(f"💶 {amt}€", key=f"qp_{amt}"):
+            if qp_cols[i].button(f"{amt} €", key=f"qp_{amt}"):
                 st.session_state.pay_amount = str(amt)
                 st.rerun()
 
         # Numpad
-        pad_rows = [["7","8","9"], ["4","5","6"], ["1","2","3"], ["0",".","⌫"], ["C","",""]]
+        pad_rows = [["7","8","9"], ["4","5","6"], ["1","2","3"], ["0",".","<"], ["C","",""]]
         for row in pad_rows:
             rcols = st.columns(3)
             for i, val in enumerate(row):
                 if val and rcols[i].button(val, key=f"pad_{val}_{row}"):
-                    numpad_press(val)
+                    numpad_press("⌫" if val == "<" else val)
                     st.rerun()
 
         # Passend button
-        if st.button("💯 Passend", use_container_width=True):
+        if st.button("Passend", use_container_width=True):
             st.session_state.pay_amount = f"{total:.2f}"
             st.rerun()
 
