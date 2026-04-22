@@ -27,7 +27,6 @@ SERVICE_ACCOUNT_CANDIDATES = [
 
 # Custom component — bidirectional, so setComponentValue works
 _component_dir = Path(__file__).parent.parent / "kasse_component"
-_kasse = components.declare_component("kasse", path=str(_component_dir))
 
 
 def get_gspread_client():
@@ -136,7 +135,8 @@ with kasse_tab:
     except Exception:
         sheet_history = {}
 
-    # Render custom component — receives checkout dict via setComponentValue when user checks out
+    _kasse = components.declare_component("kasse", path=str(_component_dir))
+
     checkout_data = _kasse(
         kassierer_list=KASSIERER_LIST,
         sheet_history=sheet_history,
