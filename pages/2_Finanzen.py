@@ -185,6 +185,21 @@ def mark_planned_as_paid(sheet_row: int, payment_date: date):
     load_transactions.clear()
 
 
+def update_transaction(sheet_row: int, record: dict):
+    worksheet = get_worksheet()
+    col_index = {column: idx + 1 for idx, column in enumerate(HEADER_ROW)}
+    for field, value in record.items():
+        if field in col_index:
+            worksheet.update_cell(sheet_row, col_index[field], value)
+    load_transactions.clear()
+
+
+def delete_transaction(sheet_row: int):
+    worksheet = get_worksheet()
+    worksheet.delete_rows(sheet_row)
+    load_transactions.clear()
+
+
 def resolve_name(name_choice: str, new_name: str) -> str:
     if name_choice == NAME_ADD_OPTION:
         return new_name.strip()
@@ -265,8 +280,8 @@ st.caption("Einzahlungen, Ausgaben, offene Erstattungen und geplante Kosten an e
 transactions_df = load_transactions()
 name_options = build_name_options(transactions_df)
 
-entry_tab, planned_tab, overview_tab = st.tabs(
-    ["Transaktion eintragen", "Geplante Ausgaben", "Uebersicht"]
+entry_tab, planned_tab, edit_tab, overview_tab = st.tabs(
+    ["Transaktion eintragen", "Geplante Ausgaben", "Bearbeiten / Loeschen", "Uebersicht"]
 )
 
 with entry_tab:
@@ -464,6 +479,156 @@ with planned_tab:
                     mark_planned_as_paid(sheet_row, payment_date)
                 st.success("Die ausgewaehlten geplanten Ausgaben wurden als vom Haus bezahlt markiert.")
                 st.rerun()
+
+with edit_tab:
+    st.subheader("Transaktion bearbeiten oder loeschen")
+
+    if transactions_df.empty:
+        st.info("Noch keine Transaktionen vorhanden.")
+    else:
+        # --- Suche / Auswahl ---
+        st.markdown("**Schritt 1: Transaktion auswaehlen**")
+        ecol1, ecol2 = st.columns(2)
+        with ecol1:
+            edit_filter_person = st.selectbox(
+                "Nach Person filtern",
+                ["Alle"] + sorted(transactions_df["Name"].dropna().astype(str).unique()),
+                key="edit_filter_person",
+            )
+        with ecol2:
+            edit_filter_cat = st.selectbox(
+                "Nach Kategorie filtern",
+                ["Alle"] + sorted(transactions_df["Kategorie"].dropna().astype(str).unique()),
+                key="edit_filter_cat",
+            )
+
+        filtered_edit = transactions_df.copy()
+        if edit_filter_person != "Alle":
+            filtered_edit = filtered_edit[filtered_edit["Name"].astype(str) == edit_filter_person]
+        if edit_filter_cat != "Alle":
+            filtered_edit = filtered_edit[filtered_edit["Kategorie"].astype(str) == edit_filter_cat]
+
+        if filtered_edit.empty:
+            st.info("Keine Transaktionen fuer diese Filterauswahl.")
+        else:
+            tx_labels = {
+                row["_sheet_row"]: (
+                    f"{row['Erfasst_Am'].strftime('%d.%m.%Y') if pd.notna(row['Erfasst_Am']) else '-'}"
+                    f" | {row['Name']} | {row['Kategorie']} | {format_euro(row['Betrag'])} | {row['Beschreibung'] or '-'}"
+                )
+                for _, row in filtered_edit.sort_values("Erfasst_Am", ascending=False).iterrows()
+            }
+
+            selected_sheet_row = st.selectbox(
+                "Transaktion auswaehlen",
+                options=list(tx_labels.keys()),
+                format_func=lambda r: tx_labels[r],
+                key="edit_selected_row",
+            )
+
+            tx = transactions_df[transactions_df["_sheet_row"] == selected_sheet_row].iloc[0]
+
+            st.markdown("---")
+            st.markdown("**Schritt 2: Felder bearbeiten**")
+
+            # Kategorie außerhalb des Forms für live Felder
+            edit_kat_idx = CATEGORY_OPTIONS.index(tx["Kategorie"]) if tx["Kategorie"] in CATEGORY_OPTIONS else 0
+            edit_kategorie = st.selectbox("Kategorie", CATEGORY_OPTIONS, index=edit_kat_idx, key="edit_kategorie")
+
+            with st.form("edit_form"):
+                ecf1, ecf2 = st.columns(2)
+                with ecf1:
+                    edit_typ_idx = TRANSACTION_TYPES.index(tx["Transaktions_Typ"]) if tx["Transaktions_Typ"] in TRANSACTION_TYPES else 0
+                    edit_typ = st.selectbox("Transaktionstyp", TRANSACTION_TYPES, index=edit_typ_idx)
+                with ecf2:
+                    name_opts = build_name_options(transactions_df)
+                    edit_name_idx = name_opts.index(tx["Name"]) if tx["Name"] in name_opts else 0
+                    edit_name = st.selectbox("Person", name_opts, index=edit_name_idx)
+
+                edit_betrag = st.number_input(
+                    "Betrag in EUR",
+                    min_value=0.0,
+                    step=0.5,
+                    format="%.2f",
+                    value=float(tx["Betrag"]) if pd.notna(tx["Betrag"]) else 0.0,
+                )
+
+                # Kategorie-spezifische Felder
+                edit_getraenk_name = ""
+                edit_getraenk_anzahl = 0
+                edit_getraenk_preis = 0.0
+                edit_getraenk_za = ""
+                edit_musik_typ = ""
+                edit_kaution = 0.0
+
+                if edit_kategorie == "Getraenke":
+                    st.markdown("**Getraenke-Details**")
+                    gec1, gec2, gec3 = st.columns(3)
+                    with gec1:
+                        edit_getraenk_name = st.text_input("Getraenk (Name)", value=str(tx.get("Getraenk_Name", "") or ""))
+                    with gec2:
+                        edit_getraenk_anzahl = st.number_input("Anzahl", min_value=0, step=1, value=int(tx.get("Getraenk_Anzahl", 0) or 0))
+                    with gec3:
+                        edit_getraenk_preis = st.number_input("Preis/Stueck", min_value=0.0, step=0.05, format="%.2f", value=float(tx.get("Getraenk_Preis_Stueck", 0.0) or 0.0))
+                    za_idx = GETRAENKE_ZAHLUNGSART.index(tx.get("Getraenk_Zahlungsart", "")) if tx.get("Getraenk_Zahlungsart", "") in GETRAENKE_ZAHLUNGSART else 0
+                    edit_getraenk_za = st.selectbox("Zahlungsart", GETRAENKE_ZAHLUNGSART, index=za_idx)
+
+                elif edit_kategorie == "Musik/Technik":
+                    st.markdown("**Musik/Technik-Details**")
+                    mt_idx = MUSIK_ZAHLUNGSTYP.index(tx.get("Musik_Zahlungstyp", "")) if tx.get("Musik_Zahlungstyp", "") in MUSIK_ZAHLUNGSTYP else 0
+                    edit_musik_typ = st.selectbox("Art der Zahlung", MUSIK_ZAHLUNGSTYP, index=mt_idx)
+                    if edit_musik_typ in ("Kaution", "Kaution + Betrag"):
+                        edit_kaution = st.number_input("Kautionsbetrag", min_value=0.0, step=10.0, format="%.2f", value=float(tx.get("Kaution_Betrag", 0.0) or 0.0))
+
+                bv_options = [HOUSE_PAYER, PRIVATE_PAYER]
+                bv_idx = bv_options.index(tx["Bezahlt_Von"]) if tx["Bezahlt_Von"] in bv_options else 0
+                edit_bezahlt_von = st.radio("Wer hat gezahlt?", bv_options, index=bv_idx, horizontal=True)
+                edit_beschreibung = st.text_area("Beschreibung", value=str(tx["Beschreibung"] or ""))
+
+                save_col, del_col = st.columns([3, 1])
+                with save_col:
+                    save_btn = st.form_submit_button("Aenderungen speichern", type="primary")
+                with del_col:
+                    delete_btn = st.form_submit_button("Loeschen", type="secondary")
+
+            if save_btn:
+                new_status = STATUS_DONE
+                new_paid_by = edit_bezahlt_von
+                if edit_typ == "Ausgabe/Einkauf" and edit_bezahlt_von == PRIVATE_PAYER:
+                    new_status = STATUS_OPEN
+                elif edit_typ == "Einzahlung auf das Haus":
+                    new_paid_by = edit_name
+                elif edit_typ == "Rueckerstattung vom Haus":
+                    new_paid_by = HOUSE_PAYER
+
+                update_transaction(selected_sheet_row, {
+                    "Name": edit_name,
+                    "Transaktions_Typ": edit_typ,
+                    "Betrag": float(edit_betrag),
+                    "Kategorie": edit_kategorie,
+                    "Bezahlt_Von": new_paid_by,
+                    "Beschreibung": edit_beschreibung,
+                    "Status": new_status,
+                    "Getraenk_Name": edit_getraenk_name if edit_kategorie == "Getraenke" else "",
+                    "Getraenk_Anzahl": edit_getraenk_anzahl if edit_kategorie == "Getraenke" else "",
+                    "Getraenk_Preis_Stueck": edit_getraenk_preis if edit_kategorie == "Getraenke" else "",
+                    "Getraenk_Zahlungsart": edit_getraenk_za if edit_kategorie == "Getraenke" else "",
+                    "Musik_Zahlungstyp": edit_musik_typ if edit_kategorie == "Musik/Technik" else "",
+                    "Kaution_Betrag": edit_kaution if edit_kategorie == "Musik/Technik" else "",
+                })
+                st.success("Transaktion wurde aktualisiert.")
+                st.rerun()
+
+            if delete_btn:
+                if st.session_state.get("delete_confirmed") != selected_sheet_row:
+                    st.session_state["delete_confirmed"] = selected_sheet_row
+                    st.warning("Nochmal auf 'Loeschen' klicken um zu bestaetigen.")
+                else:
+                    delete_transaction(selected_sheet_row)
+                    st.session_state.pop("delete_confirmed", None)
+                    st.success("Transaktion wurde geloescht.")
+                    st.rerun()
+
 
 with overview_tab:
     st.subheader("Transparente Uebersicht")
