@@ -7,7 +7,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-import streamlit.components.v1 as components
 from streamlit.errors import StreamlitSecretNotFoundError
 
 SPREADSHEET_ID = "1z6pVOSBNUcrWAdmgQfuqfNpvlwBYUkPmd58Xu29kj-U"
@@ -15,19 +14,49 @@ SHEET_NAME = "Backend_Kasse"
 HEADER = ["ID", "Zeitstempel", "Produkte", "Anzahl_Gesamt",
           "Betrag_Gesamt", "Erhalten", "Rueckgeld", "Rabatt", "Kassierer"]
 
-KASSIERER_LIST = ["Freddy","Divin","Chrissi","Jan","Leul","Sohrab",
-                  "Aldar","Lorena","Anna K.","Michelle","Finn"]
+KASSIERER_LIST = ["Freddy", "Divin", "Chrissi", "Jan", "Leul", "Sohrab",
+                  "Aldar", "Lorena", "Anna K.", "Michelle", "Finn"]
+
+PRODUCTS = [
+    {"name": "Bier",            "price": 2.0,  "category": "🍺 Classics",    "color": "#00b894"},
+    {"name": "Aeppler 0,33",    "price": 3.0,  "category": "🍺 Classics",    "color": "#0984e3"},
+    {"name": "+Pfand",          "price": 0.5,  "category": "🍺 Classics",    "color": "#b6b904"},
+    {"name": "Shot",            "price": 1.5,  "category": "🥃 Shots",       "color": "#0984e3"},
+    {"name": "Surprise Shot",   "price": 0.5,  "category": "🥃 Shots",       "color": "#6c5ce7"},
+    {"name": "Happy Hour Shot", "price": 1.0,  "category": "🥃 Shots",       "color": "#00cec9"},
+    {"name": "Spezi",           "price": 2.0,  "category": "🧃 alkoholfrei", "color": "#00b894"},
+    {"name": "Mate",            "price": 3.0,  "category": "🧃 alkoholfrei", "color": "#00b894"},
+    {"name": "+Pfand",          "price": 0.5,  "category": "🧃 alkoholfrei", "color": "#b6b904"},
+    {"name": "Limo 0,33",       "price": 1.5,  "category": "🧃 alkoholfrei", "color": "#0984e3"},
+    {"name": "Red Bull",        "price": 3.0,  "category": "🧃 alkoholfrei", "color": "#0984e3"},
+    {"name": "Sekt Mate",       "price": 4.0,  "category": "🍹 Mischen",     "color": "#00b894"},
+    {"name": "Vodka Mate",      "price": 4.0,  "category": "🍹 Mischen",     "color": "#00b894"},
+    {"name": "+Pfand",          "price": 0.5,  "category": "🍹 Mischen",     "color": "#b6b904"},
+    {"name": "Koks Mische",     "price": 5.0,  "category": "🍹 Mischen",     "color": "#0984e3"},
+    {"name": "Flasche Pfeffi",  "price": 15.0, "category": "⭐ Specials",    "color": "#6c5ce7"},
+    {"name": "Golfclub",        "price": 15.0, "category": "⭐ Specials",    "color": "#6c5ce7"},
+    {"name": "ACAB",            "price": 110.0,"category": "⭐ Specials",    "color": "#d63031"},
+    {"name": "Bierpong",        "price": 15.0, "category": "⭐ Specials",    "color": "#6c5ce7"},
+    {"name": "Mischkonsum",     "price": 15.0, "category": "⭐ Specials",    "color": "#6c5ce7"},
+    {"name": "Schmeisse Runde", "price": 16.0, "category": "⭐ Specials",    "color": "#e17055"},
+]
+
+PRODUCT_ICONS = {
+    "Bier": "🍺", "Aeppler 0,33": "🍏", "+Pfand": "♻️", "Shot": "🥃",
+    "Surprise Shot": "🎲", "Happy Hour Shot": "⏰", "Spezi": "🥤", "Mate": "🧉",
+    "Limo 0,33": "🍋", "Red Bull": "🐂", "Sekt Mate": "🥂", "Vodka Mate": "🍸",
+    "Koks Mische": "🥃", "Flasche Pfeffi": "🌿", "Golfclub": "⛳", "ACAB": "🚨",
+    "Bierpong": "🏓", "Mischkonsum": "🍹", "Schmeisse Runde": "🎉",
+}
 
 SERVICE_ACCOUNT_CANDIDATES = [
     Path("service_account.json"),
     Path(".streamlit/service_account.json"),
-    Path(".streamlit/secrets.toml.txt"),
     Path(r"C:\Users\leul.zewdie\Downloads\party-dashboard-491808-a0ddf9a20e45.json"),
 ]
 
-# Custom component — bidirectional, so setComponentValue works
-_component_dir = Path(__file__).parent.parent / "kasse_component"
 
+# ── Google Sheets ────────────────────────────────────────────────────────────
 
 def get_gspread_client():
     try:
@@ -101,65 +130,291 @@ def load_kasse():
     return df
 
 
-def build_sheet_history(df: pd.DataFrame, n: int = 10) -> dict:
-    result: dict = {}
-    if df.empty:
-        return result
-    for kassierer, group in df.groupby("Kassierer"):
-        group_sorted = group.dropna(subset=["Zeitstempel"]).sort_values("Zeitstempel", ascending=False)
-        entries = []
-        for _, row in group_sorted.head(n).iterrows():
-            ts = row["Zeitstempel"].strftime("%d.%m %H:%M") if pd.notna(row["Zeitstempel"]) else "?"
-            betrag = f"{row['Betrag_Gesamt']:.2f}"
-            produkte = str(row["Produkte"])[:40]
-            entries.append(f"{ts} - {betrag} EUR | {produkte}")
-        result[str(kassierer)] = entries
-    return result
-
-
 def format_euro(v):
-    if v is None or pd.isna(v):
+    if v is None or (isinstance(v, float) and pd.isna(v)):
         return "-"
     return f"{v:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+# ── Session state helpers ────────────────────────────────────────────────────
+
+def init_state():
+    defaults = {
+        "cart": {},           # key -> {name, price, category, quantity}
+        "pay_amount": "",     # string being typed on numpad
+        "discount": "",       # discount string e.g. "10%" or "2.50"
+        "free": False,        # gratis toggle
+        "history": [],        # list of display strings
+        "quantity": 1,        # selected quantity multiplier
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+def cart_total_base() -> float:
+    return sum(v["price"] * v["quantity"] for v in st.session_state.cart.values())
+
+
+def cart_total() -> float:
+    base = cart_total_base()
+    disc = st.session_state.discount
+    if st.session_state.free:
+        return 0.0
+    if disc:
+        if disc.endswith("%"):
+            pct = float(disc[:-1] or 0) / 100
+            return max(0.0, base - base * pct)
+        else:
+            try:
+                return max(0.0, base - float(disc.replace(",", ".")))
+            except ValueError:
+                return base
+    return base
+
+
+def add_to_cart(product: dict):
+    key = product["category"] + "::" + product["name"]
+    if key not in st.session_state.cart:
+        st.session_state.cart[key] = {**product, "quantity": 0}
+    st.session_state.cart[key]["quantity"] += st.session_state.quantity
+    st.session_state.quantity = 1
+
+
+def numpad_press(val: str):
+    cur = st.session_state.pay_amount
+    if val == "C":
+        st.session_state.pay_amount = ""
+    elif val == "⌫":
+        st.session_state.pay_amount = cur[:-1]
+    else:
+        st.session_state.pay_amount = cur + val
+
+
+# ── Page setup ───────────────────────────────────────────────────────────────
+
 st.set_page_config(page_title="THP - Kasse", page_icon="🍺", layout="wide")
+init_state()
+
+# Custom CSS for product buttons
+st.markdown("""
+<style>
+div[data-testid="column"] button {
+    width: 100%;
+    border-radius: 8px;
+    font-size: 13px;
+    padding: 6px 4px;
+    min-height: 52px;
+}
+.stButton button { width: 100%; }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🍺 Touch-Kasse")
 
 kasse_tab, auswertung_tab = st.tabs(["Kasse", "Auswertung"])
 
+# ── KASSE TAB ────────────────────────────────────────────────────────────────
 with kasse_tab:
+
+    # ── Top bar: kassierer + quantity selector ───────────────────────────────
+    top1, top2, top3 = st.columns([2, 4, 2])
+    with top1:
+        kassierer = st.selectbox("👤 Kassierer", KASSIERER_LIST, key="kassierer")
+    with top2:
+        st.markdown("**🔢 Anzahl**")
+        qcols = st.columns(11)
+        for i, q in enumerate([1,2,3,4,5,6,7,8,9,10]):
+            if qcols[i].button(str(q), key=f"q_{q}",
+                               type="primary" if st.session_state.quantity == q else "secondary"):
+                st.session_state.quantity = q
+                st.rerun()
+        if qcols[10].button("C", key="q_c"):
+            st.session_state.quantity = 1
+            st.rerun()
+    with top3:
+        st.metric("Anzahl", st.session_state.quantity)
+
+    st.divider()
+
+    # ── Product grid + Cart side by side ────────────────────────────────────
+    prod_col, cart_col = st.columns([3, 2])
+
+    with prod_col:
+        # Group products by category
+        categories: dict = {}
+        for p in PRODUCTS:
+            categories.setdefault(p["category"], []).append(p)
+
+        for cat, items in categories.items():
+            st.markdown(f"**{cat}**")
+            cols = st.columns(3)
+            for idx, p in enumerate(items):
+                icon = PRODUCT_ICONS.get(p["name"], "")
+                label = f"{icon} {p['name']}\n{p['price']:.2f} EUR"
+                if cols[idx % 3].button(label, key=f"prod_{cat}_{p['name']}_{idx}"):
+                    add_to_cart(p)
+                    st.rerun()
+
+    with cart_col:
+        st.markdown("### 🛒 Warenkorb")
+
+        if not st.session_state.cart:
+            st.caption("_Warenkorb leer_")
+        else:
+            for key, item in list(st.session_state.cart.items()):
+                c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 1])
+                c1.write(f"{item['quantity']}x **{item['name']}**")
+                c2.write(f"{item['price']:.2f}")
+                c3.write(f"= {item['quantity']*item['price']:.2f}")
+                if c4.button("➕", key=f"plus_{key}"):
+                    st.session_state.cart[key]["quantity"] += 1
+                    st.rerun()
+                if c5.button("➖", key=f"minus_{key}"):
+                    st.session_state.cart[key]["quantity"] -= 1
+                    if st.session_state.cart[key]["quantity"] <= 0:
+                        del st.session_state.cart[key]
+                    st.rerun()
+
+        # Discount
+        disc_col1, disc_col2 = st.columns([3, 1])
+        new_disc = disc_col1.text_input("💸 Rabatt (z.B. 10% oder 2.50)", value=st.session_state.discount,
+                                         key="disc_input", label_visibility="collapsed",
+                                         placeholder="Rabatt: 10% oder 2.50 EUR")
+        if new_disc != st.session_state.discount:
+            st.session_state.discount = new_disc
+
+        free_cols = st.columns(2)
+        if free_cols[0].button("🎁 Gratis" if not st.session_state.free else "🎁 Gratis ✓",
+                               type="primary" if st.session_state.free else "secondary"):
+            st.session_state.free = not st.session_state.free
+            st.rerun()
+        if free_cols[1].button("🗑️ Warenkorb leeren"):
+            st.session_state.cart = {}
+            st.session_state.discount = ""
+            st.session_state.free = False
+            st.rerun()
+
+        st.divider()
+
+        # Totals
+        base = cart_total_base()
+        total = cart_total()
+        st.markdown(f"**Summe:** {base:.2f} EUR")
+        if st.session_state.free:
+            st.markdown("**Rabatt:** 100% (Gratis)")
+        elif st.session_state.discount:
+            st.markdown(f"**Rabatt:** {st.session_state.discount}")
+        st.markdown(f"### Gesamt: **{total:.2f} EUR**")
+
+        # Payment numpad
+        st.markdown("**💶 Betrag eingeben:**")
+        try:
+            pay_val = float(st.session_state.pay_amount.replace(",", ".")) if st.session_state.pay_amount else 0.0
+        except ValueError:
+            pay_val = 0.0
+        change = pay_val - total
+
+        st.markdown(f"**Erhalten:** {pay_val:.2f} EUR")
+        if pay_val > 0:
+            color = "green" if change >= 0 else "red"
+            st.markdown(f"**Rückgeld:** :{color}[**{change:.2f} EUR**]")
+
+        # Quick pay buttons
+        qp_cols = st.columns(4)
+        for i, amt in enumerate([5, 10, 20, 50]):
+            if qp_cols[i].button(f"💶 {amt}€", key=f"qp_{amt}"):
+                st.session_state.pay_amount = str(amt)
+                st.rerun()
+
+        # Numpad
+        pad_rows = [["7","8","9"], ["4","5","6"], ["1","2","3"], ["0",".","⌫"], ["C","",""]]
+        for row in pad_rows:
+            rcols = st.columns(3)
+            for i, val in enumerate(row):
+                if val and rcols[i].button(val, key=f"pad_{val}_{row}"):
+                    numpad_press(val)
+                    st.rerun()
+
+        # Passend button
+        if st.button("💯 Passend", use_container_width=True):
+            st.session_state.pay_amount = f"{total:.2f}"
+            st.rerun()
+
+        st.divider()
+
+        # Checkout + Cancel
+        ch_col1, ch_col2 = st.columns(2)
+        checkout_clicked = ch_col1.button("✅ Zahlung abschliessen", type="primary", use_container_width=True)
+        cancel_clicked = ch_col2.button("❌ Stornieren", use_container_width=True)
+
+        if cancel_clicked:
+            st.session_state.cart = {}
+            st.session_state.pay_amount = ""
+            st.session_state.discount = ""
+            st.session_state.free = False
+            st.rerun()
+
+        if checkout_clicked:
+            if not st.session_state.cart:
+                st.error("Warenkorb ist leer!")
+            elif not st.session_state.free and pay_val < total:
+                st.error(f"Betrag zu gering! Noch {total - pay_val:.2f} EUR fehlen.")
+            else:
+                items_list = list(st.session_state.cart.values())
+                produkte_str = ", ".join(f"{x['quantity']}x {x['name']}" for x in items_list)
+                anzahl = sum(x["quantity"] for x in items_list)
+                now_str = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+                entry = f"{datetime.now().strftime('%H:%M:%S')} [{kassierer}] - {total:.2f} EUR | {produkte_str}"
+                try:
+                    append_kasse_row({
+                        "zeitstempel": now_str,
+                        "produkte": produkte_str,
+                        "anzahl_gesamt": anzahl,
+                        "betrag": total,
+                        "erhalten": pay_val,
+                        "rueckgeld": round(change, 2),
+                        "rabatt": "100%" if st.session_state.free else st.session_state.discount,
+                        "kassierer": kassierer,
+                    })
+                    st.session_state.history.insert(0, entry)
+                    st.success(f"✅ {format_euro(total)} von {kassierer} gespeichert!")
+                except Exception as e:
+                    st.error(f"Fehler beim Speichern: {e}")
+
+                # Reset cart
+                st.session_state.cart = {}
+                st.session_state.pay_amount = ""
+                st.session_state.discount = ""
+                st.session_state.free = False
+                st.rerun()
+
+    st.divider()
+
+    # ── History ──────────────────────────────────────────────────────────────
+    if st.session_state.history:
+        st.markdown("**📋 Letzte Transaktionen (diese Sitzung):**")
+        for entry in st.session_state.history[:8]:
+            st.caption(entry)
+
+    # Sheet history for selected kassierer
     try:
-        df_for_history = load_kasse()
-        sheet_history = build_sheet_history(df_for_history, n=10)
+        df_hist = load_kasse()
+        if not df_hist.empty:
+            kass_hist = df_hist[df_hist["Kassierer"] == kassierer].dropna(subset=["Zeitstempel"])
+            kass_hist = kass_hist.sort_values("Zeitstempel", ascending=False).head(5)
+            if not kass_hist.empty:
+                with st.expander(f"📄 Letzte Sheet-Einträge von {kassierer}"):
+                    for _, row in kass_hist.iterrows():
+                        ts = row["Zeitstempel"].strftime("%d.%m %H:%M")
+                        st.caption(f"{ts} - {row['Betrag_Gesamt']:.2f} EUR | {row['Produkte']}")
     except Exception:
-        sheet_history = {}
+        pass
 
-    _kasse = components.declare_component("kasse", path=str(_component_dir))
 
-    checkout_data = _kasse(
-        kassierer_list=KASSIERER_LIST,
-        sheet_history=sheet_history,
-        key="kasse_main",
-    )
-
-    # When checkout_data is set by JS, write to sheet
-    if checkout_data and isinstance(checkout_data, dict) and checkout_data.get("type") == "checkout":
-        # Deduplicate: skip if we already processed this exact checkout (same ts_epoch)
-        last_epoch = st.session_state.get("last_checkout_epoch", 0)
-        this_epoch = checkout_data.get("ts_epoch", 0)
-        if this_epoch != last_epoch:
-            st.session_state["last_checkout_epoch"] = this_epoch
-            try:
-                append_kasse_row(checkout_data)
-                kassierer = checkout_data.get("kassierer", "")
-                betrag = checkout_data.get("betrag", 0)
-                st.success(f"✅ {format_euro(betrag)} von {kassierer} ins Sheet gespeichert.")
-            except Exception as e:
-                st.error(f"Fehler beim Speichern: {e}")
-
+# ── AUSWERTUNG TAB ───────────────────────────────────────────────────────────
 with auswertung_tab:
-    if st.button("Daten neu laden"):
+    if st.button("🔄 Daten neu laden"):
         load_kasse.clear()
         st.rerun()
 
@@ -189,16 +444,18 @@ with auswertung_tab:
         if not time_df.empty:
             fig = px.bar(time_df, x="Zeitstempel", y="Betrag_Gesamt", color="Kassierer",
                          labels={"Betrag_Gesamt": "Betrag (EUR)", "Zeitstempel": "Zeit"}, height=300)
-            fig.update_layout(margin={"l":10,"r":10,"t":10,"b":10})
+            fig.update_layout(margin={"l": 10, "r": 10, "t": 10, "b": 10})
             st.plotly_chart(fig, use_container_width=True)
 
     with col2:
         st.markdown("### Umsatz pro Kassierer")
-        kass_df = df.groupby("Kassierer")["Betrag_Gesamt"].sum().reset_index().sort_values("Betrag_Gesamt", ascending=False)
-        fig2 = go.Figure(go.Bar(x=kass_df["Kassierer"], y=kass_df["Betrag_Gesamt"],
-                                text=[format_euro(v) for v in kass_df["Betrag_Gesamt"]],
-                                textposition="outside", marker_color="#1d4ed8"))
-        fig2.update_layout(height=300, margin={"l":10,"r":10,"t":10,"b":10}, yaxis_title="EUR")
+        kass_df = (df.groupby("Kassierer")["Betrag_Gesamt"].sum()
+                   .reset_index().sort_values("Betrag_Gesamt", ascending=False))
+        fig2 = go.Figure(go.Bar(
+            x=kass_df["Kassierer"], y=kass_df["Betrag_Gesamt"],
+            text=[format_euro(v) for v in kass_df["Betrag_Gesamt"]],
+            textposition="outside", marker_color="#1d4ed8"))
+        fig2.update_layout(height=300, margin={"l": 10, "r": 10, "t": 10, "b": 10}, yaxis_title="EUR")
         st.plotly_chart(fig2, use_container_width=True)
 
     st.markdown("### Meistverkaufte Produkte")
@@ -215,16 +472,19 @@ with auswertung_tab:
                 continue
 
     if product_counts:
-        prod_df = pd.DataFrame(sorted(product_counts.items(), key=lambda x: x[1], reverse=True),
-                               columns=["Produkt", "Stueck"])
-        fig3 = go.Figure(go.Bar(x=prod_df["Produkt"], y=prod_df["Stueck"],
-                                text=prod_df["Stueck"], textposition="outside", marker_color="#16a34a"))
-        fig3.update_layout(height=340, margin={"l":10,"r":10,"t":10,"b":10}, yaxis_title="Stueck")
+        prod_df = pd.DataFrame(
+            sorted(product_counts.items(), key=lambda x: x[1], reverse=True),
+            columns=["Produkt", "Stueck"])
+        fig3 = go.Figure(go.Bar(
+            x=prod_df["Produkt"], y=prod_df["Stueck"],
+            text=prod_df["Stueck"], textposition="outside", marker_color="#16a34a"))
+        fig3.update_layout(height=340, margin={"l": 10, "r": 10, "t": 10, "b": 10}, yaxis_title="Stueck")
         st.plotly_chart(fig3, use_container_width=True)
 
     with st.expander("Alle Buchungen", expanded=False):
         display = df.copy()
         display["Zeitstempel"] = display["Zeitstempel"].dt.strftime("%d.%m.%Y %H:%M").fillna("-")
         display["Betrag_Gesamt"] = display["Betrag_Gesamt"].map(format_euro)
-        st.dataframe(display[["Zeitstempel","Kassierer","Produkte","Anzahl_Gesamt","Betrag_Gesamt","Rabatt"]],
-                     use_container_width=True, hide_index=True)
+        st.dataframe(
+            display[["Zeitstempel", "Kassierer", "Produkte", "Anzahl_Gesamt", "Betrag_Gesamt", "Rabatt"]],
+            use_container_width=True, hide_index=True)
