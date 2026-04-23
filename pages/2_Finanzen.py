@@ -168,6 +168,14 @@ def to_sheet_value(value):
     return value
 
 
+def column_index_to_letter(index: int) -> str:
+    letters = []
+    while index > 0:
+        index, remainder = divmod(index - 1, 26)
+        letters.append(chr(65 + remainder))
+    return "".join(reversed(letters))
+
+
 def get_gspread_client():
     try:
         secrets = dict(st.secrets)
@@ -213,7 +221,7 @@ def get_worksheet():
 def ensure_header(worksheet):
     current_header = worksheet.row_values(1)
     if current_header[: len(HEADER_ROW)] != HEADER_ROW:
-        col_letter = chr(ord("A") + len(HEADER_ROW) - 1)
+        col_letter = column_index_to_letter(len(HEADER_ROW))
         worksheet.update(f"A1:{col_letter}1", [HEADER_ROW])
 
 
@@ -273,10 +281,19 @@ def mark_planned_as_paid(sheet_row: int, payment_date: date):
 
 def update_transaction(sheet_row: int, record: dict):
     worksheet = get_worksheet()
-    col_index = {column: idx + 1 for idx, column in enumerate(HEADER_ROW)}
+    current_values = worksheet.row_values(sheet_row)
+    padded_values = current_values[: len(HEADER_ROW)] + [""] * (len(HEADER_ROW) - len(current_values))
+    row_record = dict(zip(HEADER_ROW, padded_values))
     for field, value in record.items():
-        if field in col_index:
-            worksheet.update_cell(sheet_row, col_index[field], to_sheet_value(value))
+        if field in row_record:
+            row_record[field] = to_sheet_value(value)
+    row_values = [row_record.get(column, "") for column in HEADER_ROW]
+    end_col = column_index_to_letter(len(HEADER_ROW))
+    worksheet.update(
+        f"A{sheet_row}:{end_col}{sheet_row}",
+        [row_values],
+        value_input_option="USER_ENTERED",
+    )
     load_transactions.clear()
 
 
