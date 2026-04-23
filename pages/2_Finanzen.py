@@ -18,6 +18,7 @@ STATUS_OPEN = "Offen"
 STATUS_DONE = "Erledigt"
 STATUS_PLANNED = "Geplant"
 STATUS_PAID_BY_HOUSE = "Vom Haus bezahlt"
+PLANNED_EXPENSE_TYPE = "Geplante Ausgabe"
 TRANSACTION_TYPES = [
     "Ausgabe/Einkauf",
     "Einzahlung auf das Haus",
@@ -136,6 +137,14 @@ def build_cost_label(row: pd.Series) -> str:
         if value:
             return value
     return "Ohne Bezeichnung"
+
+
+def format_date_value(value) -> str:
+    if value is None or pd.isna(value) or str(value).strip() == "":
+        return ""
+    if isinstance(value, pd.Timestamp):
+        return value.strftime("%d.%m.%Y")
+    return str(value)
 
 
 def get_gspread_client():
@@ -488,6 +497,8 @@ with planned_tab:
     st.subheader("Zukuenftige Ausgaben erfassen")
     st.caption("Geplante Kosten bleiben sichtbar, bis sie spaeter vom Haus bezahlt werden.")
 
+    planned_category = st.selectbox("Kategorie", CATEGORY_OPTIONS, key="planned_category")
+
     with st.form("planned_expense_form", clear_on_submit=True):
         planned_name = st.selectbox("Wer meldet die geplante Ausgabe?", name_options, key="planned_name")
         st.caption("Falls 'Neuen Namen hinzufuegen...' gewaehlt wurde:")
@@ -503,7 +514,7 @@ with planned_tab:
                 key="planned_amount",
             )
         with col2:
-            planned_category = st.selectbox("Kategorie", CATEGORY_OPTIONS, key="planned_category")
+            st.text_input("Kategorie", value=planned_category, disabled=True, key="planned_category_display")
         with col3:
             due_date = st.date_input("Faellig am", value=date.today(), key="planned_due_date")
 
@@ -534,6 +545,41 @@ with planned_tab:
             help="Geplante Investitionen erscheinen nicht in den offenen Partykosten.",
             key="planned_investment",
         )
+
+        planned_getraenk_name = ""
+        planned_getraenk_anzahl = 0
+        planned_getraenk_preis_stueck = 0.0
+        planned_getraenk_zahlungsart = ""
+
+        if planned_category == "Getraenke":
+            st.markdown("**Getraenke-Details**")
+            pgcol1, pgcol2, pgcol3 = st.columns(3)
+            with pgcol1:
+                planned_getraenk_name = st.text_input(
+                    "Getraenk (Name)",
+                    placeholder="z.B. Bier, Mate, Prosecco",
+                    key="planned_getraenk_name",
+                )
+            with pgcol2:
+                planned_getraenk_anzahl = st.number_input(
+                    "Anzahl (Flaschen/Kaesten)",
+                    min_value=0,
+                    step=1,
+                    key="planned_getraenk_anzahl",
+                )
+            with pgcol3:
+                planned_getraenk_preis_stueck = st.number_input(
+                    "Preis pro Stueck in EUR",
+                    min_value=0.0,
+                    step=0.05,
+                    format="%.2f",
+                    key="planned_getraenk_preis_stueck",
+                )
+            planned_getraenk_zahlungsart = st.selectbox(
+                "Zahlungsart",
+                GETRAENKE_ZAHLUNGSART,
+                key="planned_getraenk_zahlungsart",
+            )
         planned_submit = st.form_submit_button("Geplante Ausgabe speichern")
 
     if planned_submit:
@@ -542,15 +588,19 @@ with planned_tab:
         if not final_name:
             st.error("Bitte waehle einen Namen aus oder trage einen neuen Namen ein.")
         elif planned_amount <= 0:
-            st.error("Bitte gib einen Betrag groesser als 0 ein.")
-        else:
+            if planned_category == "Getraenke" and planned_getraenk_anzahl > 0 and planned_getraenk_preis_stueck > 0:
+                planned_amount = planned_getraenk_anzahl * planned_getraenk_preis_stueck
+            else:
+                st.error("Bitte gib einen Betrag groesser als 0 ein.")
+                planned_amount = None
+        if planned_amount is not None and planned_amount > 0:
             record = {
                 "ID": make_transaction_id(),
                 "Erfasst_Am": date.today().strftime("%d.%m.%Y"),
                 "Faellig_Am": due_date.strftime("%d.%m.%Y"),
                 "Bezahlt_Am": "",
                 "Name": final_name,
-                "Transaktions_Typ": "Geplante Ausgabe",
+                "Transaktions_Typ": PLANNED_EXPENSE_TYPE,
                 "Betrag": float(planned_amount),
                 "Kategorie": planned_category,
                 "Bezahlt_Von": "",
@@ -561,13 +611,19 @@ with planned_tab:
                 "Ist_Investition": "Ja" if planned_investment else "",
                 "Status": STATUS_PLANNED,
                 "Referenz_ID": "",
+                "Getraenk_Name": planned_getraenk_name if planned_category == "Getraenke" else "",
+                "Getraenk_Anzahl": planned_getraenk_anzahl if planned_category == "Getraenke" else "",
+                "Getraenk_Preis_Stueck": planned_getraenk_preis_stueck if planned_category == "Getraenke" else "",
+                "Getraenk_Zahlungsart": planned_getraenk_zahlungsart if planned_category == "Getraenke" else "",
+                "Musik_Zahlungstyp": "",
+                "Kaution_Betrag": "",
             }
             append_transaction(record)
             st.success(f"Geplante Ausgabe ueber {format_euro(planned_amount)} wurde gespeichert.")
             st.rerun()
 
     planned_open_df = transactions_df[
-        (transactions_df["Transaktions_Typ"] == "Geplante Ausgabe")
+        (transactions_df["Transaktions_Typ"] == PLANNED_EXPENSE_TYPE)
         & (transactions_df["Status"] == STATUS_PLANNED)
     ].copy()
 
@@ -586,7 +642,7 @@ with planned_tab:
         selection_labels = {
             row["_sheet_row"]: (
                 f"{row['Name']} | {format_euro(row['Betrag'])} | "
-                f"{row['Beschreibung'] or row['Kategorie']} | "
+                f"{build_cost_label(row)} | "
                 f"faellig {row['Faellig_Am'].strftime('%d.%m.%Y') if pd.notna(row['Faellig_Am']) else '-'}"
             )
             for _, row in planned_open_df.iterrows()
@@ -663,9 +719,10 @@ with edit_tab:
 
             with st.form("edit_form"):
                 ecf1, ecf2 = st.columns(2)
+                edit_type_options = TRANSACTION_TYPES + [PLANNED_EXPENSE_TYPE]
                 with ecf1:
-                    edit_typ_idx = TRANSACTION_TYPES.index(tx["Transaktions_Typ"]) if tx["Transaktions_Typ"] in TRANSACTION_TYPES else 0
-                    edit_typ = st.selectbox("Transaktionstyp", TRANSACTION_TYPES, index=edit_typ_idx)
+                    edit_typ_idx = edit_type_options.index(tx["Transaktions_Typ"]) if tx["Transaktions_Typ"] in edit_type_options else 0
+                    edit_typ = st.selectbox("Transaktionstyp", edit_type_options, index=edit_typ_idx)
                 with ecf2:
                     name_opts = build_name_options(transactions_df)
                     edit_name_idx = name_opts.index(tx["Name"]) if tx["Name"] in name_opts else 0
@@ -730,9 +787,22 @@ with edit_tab:
                     if edit_musik_typ in ("Kaution", "Kaution + Betrag"):
                         edit_kaution = st.number_input("Kautionsbetrag", min_value=0.0, step=10.0, format="%.2f", value=float(tx.get("Kaution_Betrag", 0.0) or 0.0))
 
-                bv_options = [HOUSE_PAYER, PRIVATE_PAYER]
-                bv_idx = bv_options.index(tx["Bezahlt_Von"]) if tx["Bezahlt_Von"] in bv_options else 0
-                edit_bezahlt_von = st.radio("Wer hat gezahlt?", bv_options, index=bv_idx, horizontal=True)
+                edit_planned_status = STATUS_PLANNED
+                if edit_typ == PLANNED_EXPENSE_TYPE:
+                    planned_status_options = [STATUS_PLANNED, STATUS_PAID_BY_HOUSE]
+                    current_planned_status = tx["Status"] if tx["Status"] in planned_status_options else STATUS_PLANNED
+                    edit_planned_status = st.radio(
+                        "Status der geplanten Ausgabe",
+                        planned_status_options,
+                        index=planned_status_options.index(current_planned_status),
+                        horizontal=True,
+                    )
+                    st.caption("Geplante Ausgaben bleiben geplant, bis du sie hier oder im Tab oben als vom Haus bezahlt markierst.")
+                    edit_bezahlt_von = ""
+                else:
+                    bv_options = [HOUSE_PAYER, PRIVATE_PAYER]
+                    bv_idx = bv_options.index(tx["Bezahlt_Von"]) if tx["Bezahlt_Von"] in bv_options else 0
+                    edit_bezahlt_von = st.radio("Wer hat gezahlt?", bv_options, index=bv_idx, horizontal=True)
                 edit_beschreibung = st.text_area("Beschreibung", value=str(tx["Beschreibung"] or ""))
 
                 save_col, del_col = st.columns([3, 1])
@@ -744,7 +814,15 @@ with edit_tab:
             if save_btn:
                 new_status = STATUS_DONE
                 new_paid_by = edit_bezahlt_von
-                if edit_typ == "Ausgabe/Einkauf" and edit_bezahlt_von == PRIVATE_PAYER:
+                new_paid_at = format_date_value(tx.get("Bezahlt_Am"))
+                if edit_typ == PLANNED_EXPENSE_TYPE:
+                    new_status = edit_planned_status
+                    new_paid_by = HOUSE_PAYER if edit_planned_status == STATUS_PAID_BY_HOUSE else ""
+                    if edit_planned_status == STATUS_PAID_BY_HOUSE:
+                        new_paid_at = new_paid_at or date.today().strftime("%d.%m.%Y")
+                    else:
+                        new_paid_at = ""
+                elif edit_typ == "Ausgabe/Einkauf" and edit_bezahlt_von == PRIVATE_PAYER:
                     new_status = STATUS_OPEN
                 elif edit_typ == "Einzahlung auf das Haus":
                     new_paid_by = edit_name
@@ -756,6 +834,7 @@ with edit_tab:
                     "Transaktions_Typ": edit_typ,
                     "Betrag": float(edit_betrag),
                     "Kategorie": edit_kategorie,
+                    "Bezahlt_Am": new_paid_at,
                     "Bezahlt_Von": new_paid_by,
                     "Beschreibung": edit_beschreibung,
                     "Kostenbezeichnung": edit_kostenbezeichnung,
@@ -918,18 +997,50 @@ with overview_tab:
         getraenke_mask = (detail_df["Effektive_Anzahl"] <= 0) & (detail_df["Getraenk_Anzahl"] > 0)
         detail_df.loc[getraenke_mask, "Effektive_Anzahl"] = detail_df.loc[getraenke_mask, "Getraenk_Anzahl"]
 
+        available_categories = sorted(detail_df["Kategorie"].dropna().astype(str).unique())
+        selected_detail_category = st.selectbox(
+            "Kategorie fuer Einzelkosten",
+            options=["Alle Kategorien"] + available_categories,
+            key="detail_chart_category",
+        )
+        if selected_detail_category != "Alle Kategorien":
+            detail_df = detail_df[detail_df["Kategorie"].astype(str) == selected_detail_category]
+
         detail_summary = (
-            detail_df.groupby(["Kategorie", "Bezeichnung"], dropna=False)
+            detail_df.groupby("Bezeichnung", dropna=False)
             .agg(
                 Anzahl=("Effektive_Anzahl", "sum"),
                 Betrag=("Betrag", "sum"),
             )
             .reset_index()
-            .sort_values(["Kategorie", "Betrag"], ascending=[True, False])
+            .sort_values("Betrag", ascending=False)
         )
-        detail_summary["Anzahl"] = detail_summary["Anzahl"].map(format_quantity)
-        detail_summary["Betrag"] = detail_summary["Betrag"].map(format_euro)
-        st.dataframe(detail_summary, use_container_width=True, hide_index=True)
+
+        detail_fig = go.Figure(
+            go.Bar(
+                x=detail_summary["Betrag"],
+                y=detail_summary["Bezeichnung"],
+                orientation="h",
+                text=[
+                    (
+                        f"{format_euro(amount)}"
+                        + (f" | {format_quantity(quantity)}" if quantity and quantity > 0 else "")
+                    )
+                    for amount, quantity in zip(detail_summary["Betrag"], detail_summary["Anzahl"])
+                ],
+                textposition="outside",
+                marker_color="#0f766e",
+            )
+        )
+        detail_fig.update_layout(
+            height=max(320, 70 + len(detail_summary) * 42),
+            margin={"l": 20, "r": 40, "t": 10, "b": 20},
+            xaxis_title="EUR",
+            yaxis_title="",
+            showlegend=False,
+            yaxis={"categoryorder": "total ascending"},
+        )
+        st.plotly_chart(detail_fig, use_container_width=True)
 
     # --- Personensalden ---
     st.markdown("### Personensalden")
