@@ -1,4 +1,5 @@
 import json
+import math
 from datetime import date, datetime
 from pathlib import Path
 
@@ -147,6 +148,26 @@ def format_date_value(value) -> str:
     return str(value)
 
 
+def to_sheet_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, pd.Timestamp):
+        return value.strftime("%d.%m.%Y")
+    if isinstance(value, (datetime, date)):
+        return value.strftime("%d.%m.%Y")
+    if pd.isna(value):
+        return ""
+    if isinstance(value, bool):
+        return "Ja" if value else ""
+    if hasattr(value, "item"):
+        value = value.item()
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return ""
+        return value
+    return value
+
+
 def get_gspread_client():
     try:
         secrets = dict(st.secrets)
@@ -255,7 +276,7 @@ def update_transaction(sheet_row: int, record: dict):
     col_index = {column: idx + 1 for idx, column in enumerate(HEADER_ROW)}
     for field, value in record.items():
         if field in col_index:
-            worksheet.update_cell(sheet_row, col_index[field], value)
+            worksheet.update_cell(sheet_row, col_index[field], to_sheet_value(value))
     load_transactions.clear()
 
 
