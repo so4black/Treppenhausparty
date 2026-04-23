@@ -327,7 +327,9 @@ def build_person_summary(df: pd.DataFrame) -> pd.DataFrame:
             columns=[
                 "Name",
                 "Einzahlungen",
-                "Privat_vorgelegt",
+                "Privat_vorgelegt_Party",
+                "Privat_vorgelegt_Investition",
+                "Privat_vorgelegt_Gesamt",
                 "Rueckerstattungen",
                 "Guthaben_im_Haus",
                 "Offene_Auslagen",
@@ -341,10 +343,20 @@ def build_person_summary(df: pd.DataFrame) -> pd.DataFrame:
         .groupby("Name")["Betrag"]
         .sum()
     )
-    private_spend = (
+    private_party_spend = (
         people_df[
             (people_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
             & (people_df["Bezahlt_Von"] == PRIVATE_PAYER)
+            & (~people_df["Ist_Investition"].fillna(False))
+        ]
+        .groupby("Name")["Betrag"]
+        .sum()
+    )
+    private_investment_spend = (
+        people_df[
+            (people_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
+            & (people_df["Bezahlt_Von"] == PRIVATE_PAYER)
+            & (people_df["Ist_Investition"].fillna(False))
         ]
         .groupby("Name")["Betrag"]
         .sum()
@@ -365,16 +377,20 @@ def build_person_summary(df: pd.DataFrame) -> pd.DataFrame:
 
     summary = pd.DataFrame(index=sorted(people_df["Name"].dropna().unique()))
     summary["Einzahlungen"] = income
-    summary["Privat_vorgelegt"] = private_spend
+    summary["Privat_vorgelegt_Party"] = private_party_spend
+    summary["Privat_vorgelegt_Investition"] = private_investment_spend
     summary["Rueckerstattungen"] = refunds
     summary["Geplante_Ausgaben"] = planned
     summary = summary.fillna(0.0)
+    summary["Privat_vorgelegt_Gesamt"] = (
+        summary["Privat_vorgelegt_Party"] + summary["Privat_vorgelegt_Investition"]
+    )
     summary["Guthaben_im_Haus"] = summary["Einzahlungen"]
-    summary["Offene_Auslagen"] = summary["Privat_vorgelegt"] - summary["Rueckerstattungen"]
+    summary["Offene_Auslagen"] = summary["Privat_vorgelegt_Gesamt"] - summary["Rueckerstattungen"]
     summary["Offene_Auslagen"] = summary["Offene_Auslagen"].clip(lower=0.0)
     summary["Gesamtanspruch_gegen_Haus"] = summary["Guthaben_im_Haus"] + summary["Offene_Auslagen"]
     summary = summary.reset_index().rename(columns={"index": "Name"})
-    return summary.sort_values(["Gesamtanspruch_gegen_Haus", "Privat_vorgelegt"], ascending=[False, False])
+    return summary.sort_values(["Gesamtanspruch_gegen_Haus", "Privat_vorgelegt_Gesamt"], ascending=[False, False])
 
 
 def party_expense_mask(df: pd.DataFrame) -> pd.Series:
@@ -394,6 +410,24 @@ def planned_party_mask(df: pd.DataFrame) -> pd.Series:
         & (df["Status"] == STATUS_PLANNED)
     )
     return is_planned_party & (~df["Ist_Investition"].fillna(False))
+
+
+def investment_expense_mask(df: pd.DataFrame) -> pd.Series:
+    is_investment_spend = (
+        (df["Transaktions_Typ"] == "Ausgabe/Einkauf")
+        | (
+            (df["Transaktions_Typ"] == PLANNED_EXPENSE_TYPE)
+            & (df["Status"] == STATUS_PAID_BY_HOUSE)
+        )
+    )
+    return is_investment_spend & (df["Ist_Investition"].fillna(False))
+
+
+def initial_house_funding_mask(df: pd.DataFrame) -> pd.Series:
+    return (
+        (df["Transaktions_Typ"] == "Einzahlung auf das Haus")
+        & (df["Name"].astype(str).isin(HOUSE_NAME_ALIASES))
+    )
 
 
 st.set_page_config(page_title="Treppenhausparty - Finanzen", page_icon="EUR", layout="wide")
@@ -905,36 +939,50 @@ with overview_tab:
     st.subheader("Transparente Uebersicht")
 
     # --- Berechnungen ---
-    house_income = transactions_df.loc[
-        transactions_df["Transaktions_Typ"] == "Einzahlung auf das Haus", "Betrag"
+    initial_house_funding = transactions_df.loc[initial_house_funding_mask(transactions_df), "Betrag"].sum()
+    people_deposits = transactions_df.loc[
+        (transactions_df["Transaktions_Typ"] == "Einzahlung auf das Haus")
+        & (~initial_house_funding_mask(transactions_df)),
+        "Betrag",
     ].sum()
-    house_direct_spend = transactions_df.loc[
+    house_income = initial_house_funding + people_deposits
+    party_direct_spend = transactions_df.loc[
         party_expense_mask(transactions_df) & (transactions_df["Bezahlt_Von"] == HOUSE_PAYER),
+        "Betrag",
+    ].sum()
+    investment_direct_spend = transactions_df.loc[
+        investment_expense_mask(transactions_df) & (transactions_df["Bezahlt_Von"] == HOUSE_PAYER),
         "Betrag",
     ].sum()
     reimbursements_paid = transactions_df.loc[
         transactions_df["Transaktions_Typ"] == "Rueckerstattung vom Haus", "Betrag"
     ].sum()
-    house_total_paid = house_direct_spend + reimbursements_paid
+    house_total_paid = party_direct_spend + investment_direct_spend + reimbursements_paid
     planned_total = transactions_df.loc[
         planned_party_mask(transactions_df),
         "Betrag",
     ].sum()
-    investment_total = transactions_df.loc[
-        transactions_df["Ist_Investition"].fillna(False),
+    planned_investment_total = transactions_df.loc[
+        (transactions_df["Transaktions_Typ"] == PLANNED_EXPENSE_TYPE)
+        & (transactions_df["Status"] == STATUS_PLANNED)
+        & (transactions_df["Ist_Investition"].fillna(False)),
         "Betrag",
     ].sum()
+    party_total = transactions_df.loc[party_expense_mask(transactions_df), "Betrag"].sum()
+    investment_total = transactions_df.loc[investment_expense_mask(transactions_df), "Betrag"].sum()
 
     person_summary = build_person_summary(transactions_df)
     open_to_people = person_summary["Gesamtanspruch_gegen_Haus"].sum() if not person_summary.empty else 0.0
+    private_party_total = person_summary["Privat_vorgelegt_Party"].sum() if not person_summary.empty else 0.0
+    private_investment_total = person_summary["Privat_vorgelegt_Investition"].sum() if not person_summary.empty else 0.0
     liquide_mittel = house_income - house_total_paid
     house_balance_after_obligations = liquide_mittel - open_to_people - planned_total
 
     # --- Metriken: Zeile 1 (Liquidität) ---
     st.markdown("#### Hauskasse auf einen Blick")
     row1 = st.columns(3)
-    row1[0].metric("Eingezahlt (gesamt)", format_euro(house_income))
-    row1[1].metric("Ausgegeben (gesamt)", format_euro(house_total_paid))
+    row1[0].metric("Startbestand Haus", format_euro(initial_house_funding))
+    row1[1].metric("Einzahlungen Personen", format_euro(people_deposits))
     liq_delta = f"{'+' if liquide_mittel >= 0 else ''}{liquide_mittel:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
     row1[2].metric(
         "Liquide Mittel (Kasse)",
@@ -945,17 +993,28 @@ with overview_tab:
 
     # --- Metriken: Zeile 2 (Verpflichtungen & Endstand) ---
     row2 = st.columns(3)
-    row2[0].metric("Offene Auslagen (Personen)", format_euro(open_to_people))
-    row2[1].metric("Geplante Kosten noch offen", format_euro(planned_total))
+    row2[0].metric("Partykosten gesamt", format_euro(party_total))
+    row2[1].metric("Investitionen gesamt", format_euro(investment_total))
+    row2[2].metric("Erstattungen gezahlt", format_euro(reimbursements_paid))
+
+    row3 = st.columns(4)
+    row3[0].metric("Ansprueche gesamt", format_euro(open_to_people))
+    row3[1].metric("Privat vorgelegt Party", format_euro(private_party_total))
+    row3[2].metric("Privat vorgelegt Invest.", format_euro(private_investment_total))
     balance_color = "normal" if house_balance_after_obligations >= 0 else "inverse"
     bal_delta = f"{'+' if house_balance_after_obligations >= 0 else ''}{house_balance_after_obligations:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
-    row2[2].metric(
+    row3[3].metric(
         "Hausbestand nach allem",
         format_euro(house_balance_after_obligations),
         delta=bal_delta,
         delta_color=balance_color,
     )
-    st.caption(f"Als Investition markiert und daher nicht in den Partykosten enthalten: {format_euro(investment_total)}")
+    st.caption(
+        f"Noch offen: geplante Partykosten {format_euro(planned_total)} | geplante Investitionen {format_euro(planned_investment_total)}"
+    )
+    st.caption(
+        "Investitionen erscheinen nicht als Partykosten, privat vorgelegte Investitionen bleiben aber als Rueckzahlungsanspruch bestehen."
+    )
 
     # --- Wasserfalldiagramm ---
     st.markdown("### Geldfluss")
@@ -1088,14 +1147,26 @@ with overview_tab:
         # Tabelle mit lesbaren Spaltennamen
         display_person_summary = person_summary.rename(columns={
             "Einzahlungen": "Eingezahlt",
-            "Privat_vorgelegt": "Privat vorgelegt",
+            "Privat_vorgelegt_Party": "Privat vorgelegt Party",
+            "Privat_vorgelegt_Investition": "Privat vorgelegt Investition",
+            "Privat_vorgelegt_Gesamt": "Privat vorgelegt gesamt",
             "Rueckerstattungen": "Erstattet",
             "Guthaben_im_Haus": "Guthaben im Haus",
             "Offene_Auslagen": "Auslage offen",
             "Gesamtanspruch_gegen_Haus": "Anspruch gesamt",
             "Geplante_Ausgaben": "Geplant",
         }).copy()
-        for col in ["Eingezahlt", "Privat vorgelegt", "Erstattet", "Guthaben im Haus", "Auslage offen", "Anspruch gesamt", "Geplant"]:
+        for col in [
+            "Eingezahlt",
+            "Privat vorgelegt Party",
+            "Privat vorgelegt Investition",
+            "Privat vorgelegt gesamt",
+            "Erstattet",
+            "Guthaben im Haus",
+            "Auslage offen",
+            "Anspruch gesamt",
+            "Geplant",
+        ]:
             display_person_summary[col] = display_person_summary[col].map(format_euro)
         st.dataframe(display_person_summary, use_container_width=True, hide_index=True)
 
@@ -1110,7 +1181,9 @@ with overview_tab:
                 row_data = person_summary[person_summary["Name"] == person_name].iloc[0]
                 person_tx = transactions_df[transactions_df["Name"].astype(str) == person_name]
                 eingezahlt = row_data["Einzahlungen"]
-                vorgelegt = row_data["Privat_vorgelegt"]
+                vorgelegt = row_data["Privat_vorgelegt_Gesamt"]
+                vorgelegt_party = row_data["Privat_vorgelegt_Party"]
+                vorgelegt_invest = row_data["Privat_vorgelegt_Investition"]
                 erstattet = row_data["Rueckerstattungen"]
                 offen = row_data["Offene_Auslagen"]
                 anspruch = row_data["Gesamtanspruch_gegen_Haus"]
@@ -1136,8 +1209,10 @@ with overview_tab:
                         st.markdown(
                             f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Eingezahlt</div>"
                             f"<div style='font-size:0.85rem;margin-bottom:4px'>{format_euro(eingezahlt)}</div>"
-                            f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Privat vorgelegt</div>"
+                            f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Privat vorgelegt gesamt</div>"
                             f"<div style='font-size:0.85rem;margin-bottom:4px'>{format_euro(vorgelegt)}</div>"
+                            f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>davon Party / Invest.</div>"
+                            f"<div style='font-size:0.85rem;margin-bottom:4px'>{format_euro(vorgelegt_party)} / {format_euro(vorgelegt_invest)}</div>"
                             f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Erstattet</div>"
                             f"<div style='font-size:0.85rem;margin-bottom:4px'>{format_euro(erstattet)}</div>"
                             f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Anspruch gesamt</div>"
