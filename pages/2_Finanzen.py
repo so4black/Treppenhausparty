@@ -785,7 +785,7 @@ with overview_tab:
 
         # Detailkarten pro Person
         st.markdown("#### Details pro Person")
-        cols_per_row = 3
+        cols_per_row = 5
         people_list = person_summary["Name"].tolist()
         for row_start in range(0, len(people_list), cols_per_row):
             row_people = people_list[row_start : row_start + cols_per_row]
@@ -799,36 +799,42 @@ with overview_tab:
                 offen = row_data["Offene_Auslagen"]
                 anspruch = row_data["Gesamtanspruch_gegen_Haus"]
 
-                # Status-Farbe: grün = alles ok, orange = Auslage offen, rot = noch nicht eingezahlt
                 if eingezahlt == 0 and vorgelegt == 0:
-                    status_fn = st.warning
+                    status_color = "#7a6000"
                     status_text = "Noch nichts eingetragen"
                 elif offen > 0:
-                    status_fn = st.warning
-                    status_text = f"Auslage offen: {format_euro(offen)}"
+                    status_color = "#7a6000"
+                    status_text = f"Offen: {format_euro(offen)}"
                 else:
-                    status_fn = st.success
-                    status_text = "Alles erstattet"
+                    status_color = "#1a6b2f"
+                    status_text = "Erstattet"
 
                 with card_cols[col_idx]:
                     with st.container(border=True):
-                        st.markdown(f"**{person_name}**")
-                        status_fn(status_text)
-                        m1, m2 = st.columns(2)
-                        m1.metric("Eingezahlt", format_euro(eingezahlt))
-                        m2.metric("Privat vorgelegt", format_euro(vorgelegt))
-                        m3, m4 = st.columns(2)
-                        m3.metric("Erstattet", format_euro(erstattet))
-                        m4.metric("Anspruch gesamt", format_euro(anspruch))
-
-                        # Letzte 3 Transaktionen
-                        recent = person_tx.sort_values("Erfasst_Am", ascending=False).head(3)
+                        st.markdown(
+                            f"<div style='font-size:0.85rem;font-weight:600;margin-bottom:4px'>{person_name}</div>"
+                            f"<div style='background:{status_color};padding:3px 6px;border-radius:4px;"
+                            f"font-size:0.75rem;margin-bottom:6px'>{status_text}</div>",
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(
+                            f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Eingezahlt</div>"
+                            f"<div style='font-size:0.85rem;margin-bottom:4px'>{format_euro(eingezahlt)}</div>"
+                            f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Privat vorgelegt</div>"
+                            f"<div style='font-size:0.85rem;margin-bottom:4px'>{format_euro(vorgelegt)}</div>"
+                            f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Erstattet</div>"
+                            f"<div style='font-size:0.85rem;margin-bottom:4px'>{format_euro(erstattet)}</div>"
+                            f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Anspruch gesamt</div>"
+                            f"<div style='font-size:0.85rem;font-weight:600'>{format_euro(anspruch)}</div>",
+                            unsafe_allow_html=True,
+                        )
+                        recent = person_tx.sort_values("Erfasst_Am", ascending=False).head(2)
                         if not recent.empty:
-                            st.markdown("**Letzte Transaktionen:**")
+                            st.markdown("<div style='font-size:0.7rem;color:#aaa;margin-top:6px;margin-bottom:2px'><b>Letzte Transaktionen:</b></div>", unsafe_allow_html=True)
                             for _, tx in recent.iterrows():
                                 datum = tx["Erfasst_Am"].strftime("%d.%m.") if pd.notna(tx["Erfasst_Am"]) else "-"
                                 st.caption(
-                                    f"{datum} · {tx['Kategorie']} · {format_euro(tx['Betrag'])} · {tx['Status']}"
+                                    f"{datum} · {tx['Kategorie']} · {format_euro(tx['Betrag'])}"
                                 )
 
     # --- Privat vorgelegte Ausgaben (eingeklappt) ---
