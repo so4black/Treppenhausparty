@@ -987,16 +987,31 @@ with overview_tab:
 
     # --- Metriken: Zeile 1 (Liquidität) ---
     st.markdown("#### Hauskasse auf einen Blick")
+    ohne_anfang = st.toggle(
+        "Anfangsbestand herausrechnen (Gewinn/Verlust-Sicht)",
+        value=False,
+        help="Blendet den Anfangsbestand (Altes Polizeipräsidium) aus der Berechnung aus, "
+             "um nur den durch die Party erzielten Gewinn/Verlust zu sehen.",
+    )
+    if ohne_anfang:
+        income_basis = people_deposits + party_income
+        liquide_mittel_angepasst = income_basis - house_total_paid
+        balance_angepasst = liquide_mittel_angepasst - open_to_people - planned_total
+    else:
+        income_basis = house_income
+        liquide_mittel_angepasst = liquide_mittel
+        balance_angepasst = house_balance_after_obligations
+
     row1 = st.columns(4)
     row1[0].metric("Startbestand Haus", format_euro(initial_house_funding))
     row1[1].metric("Einzahlungen Personen", format_euro(people_deposits))
     row1[2].metric("Einnahmen Party", format_euro(party_income))
-    liq_delta = f"{'+' if liquide_mittel >= 0 else ''}{liquide_mittel:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
+    liq_delta = f"{'+' if liquide_mittel_angepasst >= 0 else ''}{liquide_mittel_angepasst:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
     row1[3].metric(
-        "Liquide Mittel (Kasse)",
-        format_euro(liquide_mittel),
+        "Liquide Mittel (Kasse)" if not ohne_anfang else "Liquide Mittel (ohne Anfangsbestand)",
+        format_euro(liquide_mittel_angepasst),
         delta=liq_delta,
-        delta_color="normal" if liquide_mittel >= 0 else "inverse",
+        delta_color="normal" if liquide_mittel_angepasst >= 0 else "inverse",
     )
 
     # --- Metriken: Zeile 2 (Verpflichtungen & Endstand) ---
@@ -1009,11 +1024,11 @@ with overview_tab:
     row3[0].metric("Ansprueche gesamt", format_euro(open_to_people))
     row3[1].metric("Privat vorgelegt Party", format_euro(private_party_total))
     row3[2].metric("Privat vorgelegt Invest.", format_euro(private_investment_total))
-    balance_color = "normal" if house_balance_after_obligations >= 0 else "inverse"
-    bal_delta = f"{'+' if house_balance_after_obligations >= 0 else ''}{house_balance_after_obligations:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
+    balance_color = "normal" if balance_angepasst >= 0 else "inverse"
+    bal_delta = f"{'+' if balance_angepasst >= 0 else ''}{balance_angepasst:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
     row3[3].metric(
-        "Hausbestand nach allem",
-        format_euro(house_balance_after_obligations),
+        "Hausbestand nach allem" if not ohne_anfang else "Gewinn/Verlust (ohne Anfangsbestand)",
+        format_euro(balance_angepasst),
         delta=bal_delta,
         delta_color=balance_color,
     )
@@ -1253,12 +1268,12 @@ with overview_tab:
                 if eingezahlt == 0 and vorgelegt == 0:
                     status_color = "#7a6000"
                     status_text = "Noch nichts eingetragen"
-                elif offen > 0:
+                elif anspruch > 0:
                     status_color = "#7a6000"
-                    status_text = f"Offen: {format_euro(offen)}"
+                    status_text = f"Offen: {format_euro(anspruch)}"
                 else:
                     status_color = "#1a6b2f"
-                    status_text = "Erstattet"
+                    status_text = "Alles beglichen"
 
                 with card_cols[col_idx]:
                     with st.container(border=True):
@@ -1289,6 +1304,44 @@ with overview_tab:
                                 st.caption(
                                     f"{datum} · {tx['Kategorie']} · {format_euro(tx['Betrag'])}"
                                 )
+
+    # --- Rückzahlungs-Checkliste ---
+    with st.expander("Rückzahlungen abhaken", expanded=False):
+        st.caption("Hier kannst du festhalten, wem das Darlehen (Einzahlung) und offene Auslagen bereits zurückgezahlt wurden.")
+        if person_summary.empty:
+            st.info("Keine Personen vorhanden.")
+        else:
+            rueckzahl_cols = st.columns(3)
+            for i, (_, row_data) in enumerate(person_summary.iterrows()):
+                pname = row_data["Name"]
+                panspruch = row_data["Gesamtanspruch_gegen_Haus"]
+                if panspruch <= 0:
+                    continue
+                col = rueckzahl_cols[i % 3]
+                key = f"rueckzahlung_{pname}"
+                already = st.session_state.get(key, False)
+                checked = col.checkbox(
+                    f"{pname} – {format_euro(panspruch)}",
+                    value=already,
+                    key=key,
+                )
+            bezahlt = [
+                row_data["Name"]
+                for _, row_data in person_summary.iterrows()
+                if row_data["Gesamtanspruch_gegen_Haus"] > 0
+                and st.session_state.get(f"rueckzahlung_{row_data['Name']}", False)
+            ]
+            offen_personen = [
+                row_data["Name"]
+                for _, row_data in person_summary.iterrows()
+                if row_data["Gesamtanspruch_gegen_Haus"] > 0
+                and not st.session_state.get(f"rueckzahlung_{row_data['Name']}", False)
+            ]
+            st.markdown("---")
+            if bezahlt:
+                st.success(f"Bereits zurückgezahlt: {', '.join(bezahlt)}")
+            if offen_personen:
+                st.warning(f"Noch offen: {', '.join(offen_personen)}")
 
     # --- Privat vorgelegte Ausgaben (eingeklappt) ---
     with st.expander("Privat vorgelegte Ausgaben", expanded=False):
