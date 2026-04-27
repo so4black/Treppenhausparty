@@ -24,6 +24,7 @@ TRANSACTION_TYPES = [
     "Ausgabe/Einkauf",
     "Einzahlung auf das Haus",
     "Rueckerstattung vom Haus",
+    "Einnahmen (Party)",
 ]
 CATEGORY_OPTIONS = [
     "Getraenke",
@@ -31,6 +32,7 @@ CATEGORY_OPTIONS = [
     "Musik/Technik",
     "Location",
     "Umlage/Einzahlung",
+    "Einnahmen",
     "Sonstiges",
 ]
 GETRAENKE_ZAHLUNGSART = ["Vorkasse", "Auf Kommission"]
@@ -530,6 +532,8 @@ with entry_tab:
                 paid_by = final_name
             elif transaktions_typ == "Rueckerstattung vom Haus":
                 paid_by = HOUSE_PAYER
+            elif transaktions_typ == "Einnahmen (Party)":
+                paid_by = HOUSE_PAYER
 
             # Betrag automatisch berechnen wenn Getraenke-Details ausgefuellt
             final_betrag = float(betrag)
@@ -945,7 +949,10 @@ with overview_tab:
         & (~initial_house_funding_mask(transactions_df)),
         "Betrag",
     ].sum()
-    house_income = initial_house_funding + people_deposits
+    party_income = transactions_df.loc[
+        transactions_df["Transaktions_Typ"] == "Einnahmen (Party)", "Betrag"
+    ].sum()
+    house_income = initial_house_funding + people_deposits + party_income
     party_direct_spend = transactions_df.loc[
         party_expense_mask(transactions_df) & (transactions_df["Bezahlt_Von"] == HOUSE_PAYER),
         "Betrag",
@@ -980,11 +987,12 @@ with overview_tab:
 
     # --- Metriken: Zeile 1 (Liquidität) ---
     st.markdown("#### Hauskasse auf einen Blick")
-    row1 = st.columns(3)
+    row1 = st.columns(4)
     row1[0].metric("Startbestand Haus", format_euro(initial_house_funding))
     row1[1].metric("Einzahlungen Personen", format_euro(people_deposits))
+    row1[2].metric("Einnahmen Party", format_euro(party_income))
     liq_delta = f"{'+' if liquide_mittel >= 0 else ''}{liquide_mittel:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
-    row1[2].metric(
+    row1[3].metric(
         "Liquide Mittel (Kasse)",
         format_euro(liquide_mittel),
         delta=liq_delta,
