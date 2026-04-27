@@ -1042,6 +1042,7 @@ with overview_tab:
     # --- Wasserfalldiagramm ---
     st.markdown("### Geldfluss")
     wf_labels = ["Einzahlungen", "Ausgaben", "Liquide Mittel", "Auslagen offen", "Geplante Kosten", "Endbestand"]
+    wf_income = income_basis  # respektiert den Toggle
     waterfall_fig = go.Figure(
         go.Waterfall(
             name="Hauskonto",
@@ -1050,20 +1051,20 @@ with overview_tab:
             x=wf_labels,
             customdata=wf_labels,
             y=[
-                house_income,
+                wf_income,
                 -house_total_paid,
-                liquide_mittel,
+                liquide_mittel_angepasst,
                 -open_to_people,
                 -planned_total,
-                house_balance_after_obligations,
+                balance_angepasst,
             ],
             text=[
-                format_euro(house_income),
+                format_euro(wf_income),
                 format_euro(-house_total_paid),
-                format_euro(liquide_mittel),
+                format_euro(liquide_mittel_angepasst),
                 format_euro(-open_to_people),
                 format_euro(-planned_total),
-                format_euro(house_balance_after_obligations),
+                format_euro(balance_angepasst),
             ],
             textposition="outside",
             increasing={"marker": {"color": "#15803d"}},
