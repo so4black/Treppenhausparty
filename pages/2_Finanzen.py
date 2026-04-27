@@ -1026,19 +1026,14 @@ with overview_tab:
 
     # --- Wasserfalldiagramm ---
     st.markdown("### Geldfluss")
+    wf_labels = ["Einzahlungen", "Ausgaben", "Liquide Mittel", "Auslagen offen", "Geplante Kosten", "Endbestand"]
     waterfall_fig = go.Figure(
         go.Waterfall(
             name="Hauskonto",
             orientation="v",
             measure=["absolute", "relative", "total", "relative", "relative", "total"],
-            x=[
-                "Einzahlungen",
-                "Ausgaben",
-                "Liquide Mittel",
-                "Auslagen offen",
-                "Geplante Kosten",
-                "Endbestand",
-            ],
+            x=wf_labels,
+            customdata=wf_labels,
             y=[
                 house_income,
                 -house_total_paid,
@@ -1067,8 +1062,54 @@ with overview_tab:
         margin={"l": 20, "r": 20, "t": 20, "b": 20},
         yaxis_title="EUR",
         showlegend=False,
+        clickmode="event",
     )
-    st.plotly_chart(waterfall_fig, use_container_width=True)
+    wf_event = st.plotly_chart(waterfall_fig, use_container_width=True, on_select="rerun", key="waterfall_chart")
+
+    # Tabelle bei Balken-Klick
+    selected_points = (wf_event or {}).get("selection", {}).get("points", [])
+    if selected_points:
+        clicked_label = selected_points[0].get("x") or selected_points[0].get("label", "")
+        detail_df = None
+        detail_title = ""
+
+        if clicked_label == "Einzahlungen":
+            detail_df = transactions_df[
+                transactions_df["Transaktions_Typ"].isin(["Einzahlung auf das Haus", "Einnahmen (Party)"])
+            ].copy()
+            detail_title = "Einzahlungen & Einnahmen"
+        elif clicked_label == "Ausgaben":
+            detail_df = transactions_df[
+                party_expense_mask(transactions_df) | investment_expense_mask(transactions_df)
+                | (transactions_df["Transaktions_Typ"] == "Rueckerstattung vom Haus")
+            ].copy()
+            detail_title = "Ausgaben & Erstattungen"
+        elif clicked_label == "Auslagen offen":
+            detail_df = transactions_df[
+                (transactions_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
+                & (transactions_df["Bezahlt_Von"] == PRIVATE_PAYER)
+                & (transactions_df["Status"] == STATUS_OPEN)
+            ].copy()
+            detail_title = "Offene Auslagen (noch nicht erstattet)"
+        elif clicked_label == "Geplante Kosten":
+            detail_df = transactions_df[
+                planned_party_mask(transactions_df)
+            ].copy()
+            detail_title = "Geplante Kosten (noch nicht bezahlt)"
+        elif clicked_label in ("Liquide Mittel", "Endbestand"):
+            st.info(f"**{clicked_label}** ist ein berechneter Wert – keine einzelnen Transaktionen dahinter.")
+
+        if detail_df is not None:
+            st.markdown(f"#### {detail_title}")
+            if detail_df.empty:
+                st.info("Keine Transaktionen vorhanden.")
+            else:
+                show_cols = ["Erfasst_Am", "Name", "Transaktions_Typ", "Kategorie", "Beschreibung", "Betrag", "Status"]
+                show_cols = [c for c in show_cols if c in detail_df.columns]
+                detail_df = detail_df.copy()
+                detail_df["Erfasst_Am"] = detail_df["Erfasst_Am"].dt.strftime("%d.%m.%Y").fillna("-")
+                detail_df["Betrag"] = detail_df["Betrag"].map(format_euro)
+                st.dataframe(detail_df[show_cols], use_container_width=True, hide_index=True)
 
     # --- Ausgaben nach Kategorie ---
     st.markdown("### Ausgaben nach Kategorie")
