@@ -1085,12 +1085,25 @@ with overview_tab:
             ].copy()
             detail_title = "Ausgaben & Erstattungen"
         elif clicked_label == "Auslagen offen":
-            detail_df = transactions_df[
+            # Guthaben: Einzahlungen die noch im Haus liegen (pro Person)
+            guthaben_df = person_summary[person_summary["Guthaben_im_Haus"] > 0][["Name", "Guthaben_im_Haus"]].copy()
+            guthaben_df = guthaben_df.rename(columns={"Guthaben_im_Haus": "Betrag"})
+            guthaben_df["Typ"] = "Guthaben im Haus (Einzahlung)"
+            # Offene private Auslagen
+            auslagen_df = transactions_df[
                 (transactions_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
                 & (transactions_df["Bezahlt_Von"] == PRIVATE_PAYER)
                 & (transactions_df["Status"] == STATUS_OPEN)
-            ].copy()
-            detail_title = "Offene Auslagen (noch nicht erstattet)"
+            ][["Name", "Kategorie", "Beschreibung", "Betrag"]].copy()
+            auslagen_df["Typ"] = "Offene Auslage (privat vorgestreckt)"
+            combined = pd.concat([
+                guthaben_df[["Name", "Typ", "Betrag"]],
+                auslagen_df[["Name", "Typ", "Kategorie", "Beschreibung", "Betrag"]],
+            ], ignore_index=True)
+            combined["Betrag"] = combined["Betrag"].map(format_euro)
+            st.markdown("#### Ansprüche gegen das Haus")
+            st.dataframe(combined, use_container_width=True, hide_index=True)
+            detail_title = None  # schon gerendert
         elif clicked_label == "Geplante Kosten":
             detail_df = transactions_df[
                 planned_party_mask(transactions_df)
