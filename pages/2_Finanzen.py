@@ -388,9 +388,12 @@ def build_person_summary(df: pd.DataFrame) -> pd.DataFrame:
     summary["Privat_vorgelegt_Gesamt"] = (
         summary["Privat_vorgelegt_Party"] + summary["Privat_vorgelegt_Investition"]
     )
-    summary["Guthaben_im_Haus"] = summary["Einzahlungen"]
-    summary["Offene_Auslagen"] = summary["Privat_vorgelegt_Gesamt"] - summary["Rueckerstattungen"]
-    summary["Offene_Auslagen"] = summary["Offene_Auslagen"].clip(lower=0.0)
+    # Erstattungen decken zuerst offene Auslagen, dann die Einzahlung (Guthaben)
+    raw_auslagen = summary["Privat_vorgelegt_Gesamt"] - summary["Rueckerstattungen"]
+    summary["Offene_Auslagen"] = raw_auslagen.clip(lower=0.0)
+    # Überschuss-Erstattungen (mehr erstattet als vorgelegt) mindern das Guthaben
+    ueberschuss_erstattung = (-raw_auslagen).clip(lower=0.0)
+    summary["Guthaben_im_Haus"] = (summary["Einzahlungen"] - ueberschuss_erstattung).clip(lower=0.0)
     summary["Gesamtanspruch_gegen_Haus"] = summary["Guthaben_im_Haus"] + summary["Offene_Auslagen"]
     summary = summary.reset_index().rename(columns={"index": "Name"})
     return summary.sort_values(["Gesamtanspruch_gegen_Haus", "Privat_vorgelegt_Gesamt"], ascending=[False, False])
