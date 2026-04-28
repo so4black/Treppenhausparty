@@ -37,6 +37,15 @@ CATEGORY_OPTIONS = [
     "Sonstiges",
 ]
 GETRAENKE_ZAHLUNGSART = ["Vorkasse", "Auf Kommission"]
+KATEGORIE_COLORS = {
+    "Getraenke": "#1d4ed8",
+    "Deko": "#db2777",
+    "Musik/Technik": "#7c3aed",
+    "Location": "#b45309",
+    "Umlage/Einzahlung": "#15803d",
+    "Einnahmen": "#22c55e",
+    "Sonstiges": "#64748b",
+}
 MUSIK_ZAHLUNGSTYP = ["Normaler Betrag", "Kaution", "Kaution + Betrag"]
 STANDARD_NAMES = [
     HOUSE_PAYER,
@@ -1143,8 +1152,8 @@ with overview_tab:
                     marker_color="#7c3aed",
                 ))
                 anspruch_fig.update_layout(
-                    height=320,
-                    margin={"l": 10, "r": 60, "t": 10, "b": 10},
+                    height=max(420, 80 + len(anspruch_df) * 52),
+                    margin={"l": 10, "r": 80, "t": 10, "b": 10},
                     xaxis_title="EUR",
                     yaxis_title="",
                     showlegend=False,
@@ -1166,15 +1175,6 @@ with overview_tab:
             .reset_index()
             .sort_values("Datum")
         )
-        kategorie_colors = {
-            "Getraenke": "#1d4ed8",
-            "Deko": "#db2777",
-            "Musik/Technik": "#7c3aed",
-            "Location": "#b45309",
-            "Umlage/Einzahlung": "#15803d",
-            "Einnahmen": "#22c55e",
-            "Sonstiges": "#64748b",
-        }
         timeline_fig = go.Figure()
         for kat in timeline_agg["Kategorie"].unique():
             df_k = timeline_agg[timeline_agg["Kategorie"] == kat]
@@ -1182,7 +1182,7 @@ with overview_tab:
                 x=df_k["Datum"].astype(str),
                 y=df_k["Betrag"],
                 name=kat,
-                marker_color=kategorie_colors.get(kat, "#94a3b8"),
+                marker_color=KATEGORIE_COLORS.get(kat, "#94a3b8"),
                 hovertemplate=f"<b>{kat}</b><br>%{{x}}<br>%{{y:,.2f}} EUR<extra></extra>",
             ))
         timeline_fig.update_layout(
@@ -1239,17 +1239,8 @@ with overview_tab:
         getraenke_mask = (detail_df["Effektive_Anzahl"] <= 0) & (detail_df["Getraenk_Anzahl"] > 0)
         detail_df.loc[getraenke_mask, "Effektive_Anzahl"] = detail_df.loc[getraenke_mask, "Getraenk_Anzahl"]
 
-        available_categories = sorted(detail_df["Kategorie"].dropna().astype(str).unique())
-        selected_detail_category = st.selectbox(
-            "Kategorie fuer Einzelkosten",
-            options=["Alle Kategorien"] + available_categories,
-            key="detail_chart_category",
-        )
-        if selected_detail_category != "Alle Kategorien":
-            detail_df = detail_df[detail_df["Kategorie"].astype(str) == selected_detail_category]
-
         detail_summary = (
-            detail_df.groupby("Bezeichnung", dropna=False)
+            detail_df.groupby(["Bezeichnung", "Kategorie"], dropna=False)
             .agg(
                 Anzahl=("Effektive_Anzahl", "sum"),
                 Betrag=("Betrag", "sum"),
@@ -1258,32 +1249,38 @@ with overview_tab:
             .sort_values("Betrag", ascending=False)
         )
 
-        detail_fig = go.Figure(
-            go.Bar(
-                x=detail_summary["Betrag"],
-                y=detail_summary["Bezeichnung"],
-                orientation="h",
-                text=[
-                    (
-                        f"{format_euro(amount)}"
-                        + (f" | {format_quantity(quantity)}" if quantity and quantity > 0 else "")
-                    )
-                    for amount, quantity in zip(detail_summary["Betrag"], detail_summary["Anzahl"])
-                ],
-                textposition="outside",
-                marker_color="#0f766e",
-                hovertemplate="<b>%{y}</b><br>%{x:,.2f} EUR<extra></extra>",
-            )
+        pie_colors = [KATEGORIE_COLORS.get(k, "#94a3b8") for k in detail_summary["Kategorie"]]
+        detail_pie = go.Figure(go.Pie(
+            labels=detail_summary["Bezeichnung"],
+            values=detail_summary["Betrag"],
+            marker={"colors": pie_colors},
+            customdata=list(zip(detail_summary["Kategorie"], detail_summary["Anzahl"])),
+            hovertemplate=(
+                "<b>%{label}</b><br>"
+                "Kategorie: %{customdata[0]}<br>"
+                "%{value:,.2f} EUR (%{percent})"
+                "<extra></extra>"
+            ),
+            textinfo="label+percent",
+            textposition="outside",
+            hole=0.3,
+        ))
+        detail_pie.update_layout(
+            height=max(480, 300 + len(detail_summary) * 12),
+            margin={"l": 20, "r": 20, "t": 10, "b": 20},
+            showlegend=True,
+            legend={"orientation": "v", "x": 1.02, "y": 0.5},
         )
-        detail_fig.update_layout(
-            height=max(320, 70 + len(detail_summary) * 42),
-            margin={"l": 20, "r": 40, "t": 10, "b": 20},
-            xaxis_title="EUR",
-            yaxis_title="",
-            showlegend=False,
-            yaxis={"categoryorder": "total ascending"},
+        st.plotly_chart(detail_pie, use_container_width=True)
+
+        # Legende der Kategoriefarben
+        color_items = " &nbsp;&nbsp; ".join(
+            f'<span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:{c};margin-right:4px;vertical-align:middle"></span>{k}'
+            for k, c in KATEGORIE_COLORS.items()
+            if k in detail_summary["Kategorie"].values
         )
-        st.plotly_chart(detail_fig, use_container_width=True)
+        if color_items:
+            st.markdown(f"<div style='font-size:0.75rem;color:#aaa'>{color_items}</div>", unsafe_allow_html=True)
 
     # --- Personensalden ---
     st.markdown("### Personensalden")
