@@ -440,43 +440,93 @@ st.caption("Einzahlungen, Ausgaben, offene Erstattungen und geplante Kosten an e
 transactions_df = load_transactions()
 name_options = build_name_options(transactions_df)
 
-entry_tab, planned_tab, edit_tab, overview_tab = st.tabs(
-    ["Transaktion eintragen", "Geplante Ausgaben", "Bearbeiten / Loeschen", "Uebersicht"]
+entry_tab, edit_tab, overview_tab = st.tabs(
+    ["Eintragen", "Bearbeiten / Löschen", "Übersicht"]
 )
 
+# ---------------------------------------------------------------------------
+# EINTRAGEN-TAB
+# ---------------------------------------------------------------------------
 with entry_tab:
     st.subheader("Neue Transaktion")
 
-    # Kategorie außerhalb des Forms, damit die Zusatzfelder live erscheinen
-    kategorie = st.selectbox("Kategorie", CATEGORY_OPTIONS, key="entry_kategorie")
+    # Typ-Auswahl außerhalb des Forms (steuert sichtbare Felder)
+    ENTRY_TYPES = {
+        "Ausgabe": "Ausgabe/Einkauf",
+        "Einzahlung": "Einzahlung auf das Haus",
+        "Erstattung": "Rueckerstattung vom Haus",
+        "Einnahme (Party)": "Einnahmen (Party)",
+        "Verrechnung": "Verrechnung (Warenübernahme)",
+    }
+    entry_type_label = st.radio(
+        "Was möchtest du eintragen?",
+        list(ENTRY_TYPES.keys()),
+        horizontal=True,
+        key="entry_type_label",
+    )
+    entry_type = ENTRY_TYPES[entry_type_label]
+
+    # Kategorie nur für Ausgaben & Verrechnung sinnvoll
+    needs_category = entry_type_label in ("Ausgabe", "Verrechnung")
+    needs_person = entry_type_label != "Einnahme (Party)"  # Einnahme → immer "Das Haus"
+
+    if needs_category:
+        entry_kategorie = st.selectbox("Kategorie", CATEGORY_OPTIONS, key="entry_kategorie")
+    else:
+        entry_kategorie = "Sonstiges"
 
     with st.form("transaktion_form", clear_on_submit=True):
-        transaktions_typ = st.selectbox("Was moechtest du eintragen?", TRANSACTION_TYPES)
-        name_auswahl = st.selectbox("Wer traegt es ein / um wen geht es?", name_options)
-        st.caption("Falls 'Neuen Namen hinzufuegen...' gewaehlt wurde:")
-        neuer_name = st.text_input("Neuer Name")
 
-        col1, col2 = st.columns(2)
-        with col1:
+        # Person
+        if needs_person:
+            name_col, new_col = st.columns([2, 1])
+            with name_col:
+                name_auswahl = st.selectbox("Person", name_options)
+            with new_col:
+                neuer_name = st.text_input("Neuer Name (falls oben letzte Option)")
+        else:
+            name_auswahl = HOUSE_PAYER
+            neuer_name = ""
+
+        # Betrag & Bezeichnung
+        bez_col, amt_col = st.columns([2, 1])
+        with bez_col:
             kostenbezeichnung = st.text_input(
                 "Bezeichnung",
                 placeholder="z.B. Bier, Kabelbinder, Kuehlschrank",
             )
-        with col2:
+        with amt_col:
             betrag = st.number_input("Betrag in EUR", min_value=0.0, step=0.5, format="%.2f")
 
-        menge_col1, menge_col2, menge_col3 = st.columns([1, 1, 1.2])
-        with menge_col1:
-            anzahl = st.number_input("Anzahl", min_value=0.0, step=1.0, format="%.2f")
-        with menge_col2:
-            einheit = st.text_input("Einheit", placeholder="z.B. Stk., Kisten, Meter")
-        with menge_col3:
-            ist_investition = st.checkbox(
-                "Als Investition markieren",
-                help="Investitionen werden gespeichert, tauchen aber nicht als Partykosten in der Uebersicht auf.",
-            )
+        # Menge (nur bei Ausgabe)
+        if entry_type_label == "Ausgabe":
+            mq1, mq2, mq3, mq4 = st.columns([1, 1, 1, 1.2])
+            with mq1:
+                anzahl = st.number_input("Anzahl", min_value=0.0, step=1.0, format="%.2f")
+            with mq2:
+                einheit = st.text_input("Einheit", placeholder="z.B. Stk., Kisten")
+            with mq3:
+                ist_geplant = st.checkbox("Geplant (noch nicht bezahlt)", help="Trägt die Ausgabe als geplante Kosten ein.")
+            with mq4:
+                ist_investition = st.checkbox("Investition", help="Investitionen tauchen nicht als Partykosten auf.")
+            if ist_geplant:
+                due_date = st.date_input("Fällig am", value=date.today())
+            else:
+                due_date = None
+        else:
+            anzahl = 0.0
+            einheit = ""
+            ist_geplant = False
+            ist_investition = False
+            due_date = None
 
-        # --- Kategorie-spezifische Zusatzfelder ---
+        # Wer hat gezahlt? (nur bei Ausgabe relevant)
+        if entry_type_label == "Ausgabe":
+            bezahlt_von = st.radio("Wer hat gezahlt?", [HOUSE_PAYER, PRIVATE_PAYER], horizontal=True)
+        else:
+            bezahlt_von = HOUSE_PAYER
+
+        # Getränke-Details
         getraenk_name = ""
         getraenk_anzahl = 0
         getraenk_preis_stueck = 0.0
@@ -484,107 +534,88 @@ with entry_tab:
         musik_zahlungstyp = ""
         kaution_betrag = 0.0
 
-        if kategorie == "Getraenke":
-            st.markdown("**Getraenke-Details**")
+        if needs_category and entry_kategorie == "Getraenke":
+            st.markdown("**Getränke-Details**")
             gcol1, gcol2, gcol3 = st.columns(3)
             with gcol1:
-                getraenk_name = st.text_input("Getraenk (Name)", placeholder="z.B. Bier, Mate, Prosecco")
+                getraenk_name = st.text_input("Getränk", placeholder="z.B. Bier, Mate")
             with gcol2:
-                getraenk_anzahl = st.number_input("Anzahl (Flaschen/Kaesten)", min_value=0, step=1)
+                getraenk_anzahl = st.number_input("Anzahl (Fl./Kästen)", min_value=0, step=1)
             with gcol3:
-                getraenk_preis_stueck = st.number_input("Preis pro Stueck in EUR", min_value=0.0, step=0.05, format="%.2f")
+                getraenk_preis_stueck = st.number_input("Preis/Stück EUR", min_value=0.0, step=0.05, format="%.2f")
             getraenk_zahlungsart = st.selectbox("Zahlungsart", GETRAENKE_ZAHLUNGSART)
 
-        elif kategorie == "Musik/Technik":
+        elif needs_category and entry_kategorie == "Musik/Technik":
             st.markdown("**Musik/Technik-Details**")
             musik_zahlungstyp = st.selectbox("Art der Zahlung", MUSIK_ZAHLUNGSTYP)
             if musik_zahlungstyp in ("Kaution", "Kaution + Betrag"):
-                kaution_betrag = st.number_input(
-                    "Kautionsbetrag in EUR",
-                    min_value=0.0,
-                    step=10.0,
-                    format="%.2f",
-                    help="Kaution wird separat erfasst und erscheint in der Uebersicht als rueckerstattbar.",
-                )
+                kaution_betrag = st.number_input("Kautionsbetrag EUR", min_value=0.0, step=10.0, format="%.2f")
 
-        bezahlt_von = st.radio(
-            "Wer hat gezahlt?",
-            [HOUSE_PAYER, PRIVATE_PAYER],
-            horizontal=True,
-        )
-        beschreibung = st.text_area("Beschreibung", placeholder="z.B. Becher, Kabel, Deko")
-        submitted = st.form_submit_button("Transaktion speichern")
+        beschreibung = st.text_area("Beschreibung / Notiz", placeholder="z.B. Becher, Kabel, Deko")
+        submitted = st.form_submit_button("💾 Speichern", type="primary")
 
     if submitted:
-        final_name = resolve_name(name_auswahl, neuer_name)
+        final_name = resolve_name(name_auswahl, neuer_name) if needs_person else HOUSE_PAYER
+
+        # Betrag auto-berechnen aus Getränke-Details
+        final_betrag = float(betrag)
+        if entry_kategorie == "Getraenke" and getraenk_anzahl > 0 and getraenk_preis_stueck > 0 and betrag == 0:
+            final_betrag = getraenk_anzahl * getraenk_preis_stueck
 
         if not final_name:
-            st.error("Bitte waehle einen Namen aus oder trage einen neuen Namen ein.")
-        elif betrag <= 0 and kategorie not in ("Musik/Technik",) and not (kategorie == "Musik/Technik" and kaution_betrag > 0):
-            st.error("Bitte gib einen Betrag groesser als 0 ein.")
-        elif transaktions_typ == "Verrechnung (Warenübernahme)":
-            # Betrag automatisch berechnen wenn Getraenke-Details ausgefuellt
-            final_betrag = float(betrag)
-            if kategorie == "Getraenke" and getraenk_anzahl > 0 and getraenk_preis_stueck > 0 and betrag == 0:
-                final_betrag = getraenk_anzahl * getraenk_preis_stueck
+            st.error("Bitte wähle eine Person aus oder trage einen neuen Namen ein.")
+        elif final_betrag <= 0 and not (entry_kategorie == "Musik/Technik" and kaution_betrag > 0):
+            st.error("Bitte gib einen Betrag größer als 0 ein.")
+        elif entry_type == "Verrechnung (Warenübernahme)":
             tx_id = make_transaction_id()
             paid_at = date.today().strftime("%d.%m.%Y")
-            base_record = {
-                "Erfasst_Am": paid_at,
-                "Faellig_Am": "",
-                "Bezahlt_Am": paid_at,
-                "Betrag": final_betrag,
-                "Kategorie": kategorie,
-                "Beschreibung": beschreibung,
-                "Kostenbezeichnung": kostenbezeichnung,
-                "Anzahl": anzahl,
-                "Einheit": einheit,
-                "Ist_Investition": "",
+            base = {
+                "Erfasst_Am": paid_at, "Faellig_Am": "", "Bezahlt_Am": paid_at,
+                "Betrag": final_betrag, "Kategorie": entry_kategorie,
+                "Beschreibung": beschreibung, "Kostenbezeichnung": kostenbezeichnung,
+                "Anzahl": anzahl, "Einheit": einheit, "Ist_Investition": "",
                 "Status": STATUS_DONE,
                 "Getraenk_Name": getraenk_name,
-                "Getraenk_Anzahl": getraenk_anzahl if kategorie == "Getraenke" else "",
-                "Getraenk_Preis_Stueck": getraenk_preis_stueck if kategorie == "Getraenke" else "",
-                "Getraenk_Zahlungsart": getraenk_zahlungsart if kategorie == "Getraenke" else "",
-                "Musik_Zahlungstyp": "",
-                "Kaution_Betrag": "",
+                "Getraenk_Anzahl": getraenk_anzahl if entry_kategorie == "Getraenke" else "",
+                "Getraenk_Preis_Stueck": getraenk_preis_stueck if entry_kategorie == "Getraenke" else "",
+                "Getraenk_Zahlungsart": getraenk_zahlungsart if entry_kategorie == "Getraenke" else "",
+                "Musik_Zahlungstyp": "", "Kaution_Betrag": "",
             }
-            # 1) Einnahme für das Haus
-            einnahme_record = {**base_record, "ID": tx_id, "Name": HOUSE_PAYER, "Transaktions_Typ": "Einnahmen (Party)", "Bezahlt_Von": HOUSE_PAYER, "Referenz_ID": tx_id}
-            # 2) Erstattung an die Person (verrechnet deren Anspruch)
-            erstattung_id = make_transaction_id()
-            erstattung_record = {**base_record, "ID": erstattung_id, "Name": final_name, "Transaktions_Typ": "Rueckerstattung vom Haus", "Bezahlt_Von": HOUSE_PAYER, "Referenz_ID": tx_id}
-            append_transaction(einnahme_record)
-            append_transaction(erstattung_record)
-            st.success(f"Verrechnung über {format_euro(final_betrag)} für {final_name} gespeichert (Einnahme + Erstattung).")
+            append_transaction({**base, "ID": tx_id, "Name": HOUSE_PAYER, "Transaktions_Typ": "Einnahmen (Party)", "Bezahlt_Von": HOUSE_PAYER, "Referenz_ID": tx_id})
+            append_transaction({**base, "ID": make_transaction_id(), "Name": final_name, "Transaktions_Typ": "Rueckerstattung vom Haus", "Bezahlt_Von": HOUSE_PAYER, "Referenz_ID": tx_id})
+            st.success(f"Verrechnung über {format_euro(final_betrag)} für {final_name} gespeichert.")
             st.rerun()
         else:
-            status = STATUS_DONE
-            paid_by = bezahlt_von
             paid_at = date.today().strftime("%d.%m.%Y")
-
-            if transaktions_typ == "Ausgabe/Einkauf" and bezahlt_von == PRIVATE_PAYER:
-                status = STATUS_OPEN
-            elif transaktions_typ == "Einzahlung auf das Haus":
-                paid_by = final_name
-            elif transaktions_typ == "Rueckerstattung vom Haus":
-                paid_by = HOUSE_PAYER
-            elif transaktions_typ == "Einnahmen (Party)":
-                paid_by = HOUSE_PAYER
-
-            # Betrag automatisch berechnen wenn Getraenke-Details ausgefuellt
-            final_betrag = float(betrag)
-            if kategorie == "Getraenke" and getraenk_anzahl > 0 and getraenk_preis_stueck > 0 and betrag == 0:
-                final_betrag = getraenk_anzahl * getraenk_preis_stueck
+            if ist_geplant:
+                tx_typ = PLANNED_EXPENSE_TYPE
+                status = STATUS_PLANNED
+                paid_by = ""
+                paid_at_val = ""
+                faellig = due_date.strftime("%d.%m.%Y") if due_date else ""
+            else:
+                tx_typ = entry_type
+                faellig = ""
+                paid_at_val = paid_at
+                if entry_type == "Ausgabe/Einkauf" and bezahlt_von == PRIVATE_PAYER:
+                    status = STATUS_OPEN
+                    paid_by = PRIVATE_PAYER
+                elif entry_type == "Einzahlung auf das Haus":
+                    status = STATUS_DONE
+                    paid_by = final_name
+                else:
+                    status = STATUS_DONE
+                    paid_by = HOUSE_PAYER
 
             record = {
                 "ID": make_transaction_id(),
-                "Erfasst_Am": date.today().strftime("%d.%m.%Y"),
-                "Faellig_Am": "",
-                "Bezahlt_Am": paid_at,
+                "Erfasst_Am": paid_at,
+                "Faellig_Am": faellig,
+                "Bezahlt_Am": paid_at_val,
                 "Name": final_name,
-                "Transaktions_Typ": transaktions_typ,
+                "Transaktions_Typ": tx_typ,
                 "Betrag": final_betrag,
-                "Kategorie": kategorie,
+                "Kategorie": entry_kategorie,
                 "Bezahlt_Von": paid_by,
                 "Beschreibung": beschreibung,
                 "Kostenbezeichnung": kostenbezeichnung,
@@ -594,184 +625,56 @@ with entry_tab:
                 "Status": status,
                 "Referenz_ID": "",
                 "Getraenk_Name": getraenk_name,
-                "Getraenk_Anzahl": getraenk_anzahl if kategorie == "Getraenke" else "",
-                "Getraenk_Preis_Stueck": getraenk_preis_stueck if kategorie == "Getraenke" else "",
-                "Getraenk_Zahlungsart": getraenk_zahlungsart if kategorie == "Getraenke" else "",
-                "Musik_Zahlungstyp": musik_zahlungstyp if kategorie == "Musik/Technik" else "",
-                "Kaution_Betrag": kaution_betrag if kategorie == "Musik/Technik" else "",
+                "Getraenk_Anzahl": getraenk_anzahl if entry_kategorie == "Getraenke" else "",
+                "Getraenk_Preis_Stueck": getraenk_preis_stueck if entry_kategorie == "Getraenke" else "",
+                "Getraenk_Zahlungsart": getraenk_zahlungsart if entry_kategorie == "Getraenke" else "",
+                "Musik_Zahlungstyp": musik_zahlungstyp if entry_kategorie == "Musik/Technik" else "",
+                "Kaution_Betrag": kaution_betrag if entry_kategorie == "Musik/Technik" else "",
             }
             append_transaction(record)
             anzeige_betrag = final_betrag if final_betrag > 0 else kaution_betrag
-            st.success(f"{format_euro(anzeige_betrag)} fuer {final_name} wurde gespeichert.")
+            label = "Geplante Ausgabe" if ist_geplant else entry_type_label
+            st.success(f"{label}: {format_euro(anzeige_betrag)} für {final_name} gespeichert.")
             st.rerun()
 
-with planned_tab:
-    st.subheader("Zukuenftige Ausgaben erfassen")
-    st.caption("Geplante Kosten bleiben sichtbar, bis sie spaeter vom Haus bezahlt werden.")
-
-    planned_category = st.selectbox("Kategorie", CATEGORY_OPTIONS, key="planned_category")
-
-    with st.form("planned_expense_form", clear_on_submit=True):
-        planned_name = st.selectbox("Wer meldet die geplante Ausgabe?", name_options, key="planned_name")
-        st.caption("Falls 'Neuen Namen hinzufuegen...' gewaehlt wurde:")
-        planned_new_name = st.text_input("Neuer Name fuer geplante Ausgabe")
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            planned_amount = st.number_input(
-                "Geplanter Betrag in EUR",
-                min_value=0.0,
-                step=0.5,
-                format="%.2f",
-                key="planned_amount",
-            )
-        with col2:
-            st.text_input("Kategorie", value=planned_category, disabled=True, key="planned_category_display")
-        with col3:
-            due_date = st.date_input("Faellig am", value=date.today(), key="planned_due_date")
-
-        planned_description = st.text_area(
-            "Beschreibung der geplanten Ausgabe",
-            placeholder="z.B. Restgetraenke, Leihtechnik, Reinigung",
-            key="planned_description",
-        )
-        pcol1, pcol2, pcol3 = st.columns([1.2, 1, 1.1])
-        with pcol1:
-            planned_label = st.text_input(
-                "Bezeichnung",
-                placeholder="z.B. Restbier, Boxenstativ, Putzmittel",
-                key="planned_label",
-            )
-        with pcol2:
-            planned_quantity = st.number_input(
-                "Anzahl",
-                min_value=0.0,
-                step=1.0,
-                format="%.2f",
-                key="planned_quantity",
-            )
-        with pcol3:
-            planned_unit = st.text_input("Einheit", placeholder="z.B. Stk.", key="planned_unit")
-        planned_investment = st.checkbox(
-            "Als Investition markieren",
-            help="Geplante Investitionen erscheinen nicht in den offenen Partykosten.",
-            key="planned_investment",
-        )
-
-        planned_getraenk_name = ""
-        planned_getraenk_anzahl = 0
-        planned_getraenk_preis_stueck = 0.0
-        planned_getraenk_zahlungsart = ""
-
-        if planned_category == "Getraenke":
-            st.markdown("**Getraenke-Details**")
-            pgcol1, pgcol2, pgcol3 = st.columns(3)
-            with pgcol1:
-                planned_getraenk_name = st.text_input(
-                    "Getraenk (Name)",
-                    placeholder="z.B. Bier, Mate, Prosecco",
-                    key="planned_getraenk_name",
-                )
-            with pgcol2:
-                planned_getraenk_anzahl = st.number_input(
-                    "Anzahl (Flaschen/Kaesten)",
-                    min_value=0,
-                    step=1,
-                    key="planned_getraenk_anzahl",
-                )
-            with pgcol3:
-                planned_getraenk_preis_stueck = st.number_input(
-                    "Preis pro Stueck in EUR",
-                    min_value=0.0,
-                    step=0.05,
-                    format="%.2f",
-                    key="planned_getraenk_preis_stueck",
-                )
-            planned_getraenk_zahlungsart = st.selectbox(
-                "Zahlungsart",
-                GETRAENKE_ZAHLUNGSART,
-                key="planned_getraenk_zahlungsart",
-            )
-        planned_submit = st.form_submit_button("Geplante Ausgabe speichern")
-
-    if planned_submit:
-        final_name = resolve_name(planned_name, planned_new_name)
-
-        if not final_name:
-            st.error("Bitte waehle einen Namen aus oder trage einen neuen Namen ein.")
-        elif planned_amount <= 0:
-            if planned_category == "Getraenke" and planned_getraenk_anzahl > 0 and planned_getraenk_preis_stueck > 0:
-                planned_amount = planned_getraenk_anzahl * planned_getraenk_preis_stueck
-            else:
-                st.error("Bitte gib einen Betrag groesser als 0 ein.")
-                planned_amount = None
-        if planned_amount is not None and planned_amount > 0:
-            record = {
-                "ID": make_transaction_id(),
-                "Erfasst_Am": date.today().strftime("%d.%m.%Y"),
-                "Faellig_Am": due_date.strftime("%d.%m.%Y"),
-                "Bezahlt_Am": "",
-                "Name": final_name,
-                "Transaktions_Typ": PLANNED_EXPENSE_TYPE,
-                "Betrag": float(planned_amount),
-                "Kategorie": planned_category,
-                "Bezahlt_Von": "",
-                "Beschreibung": planned_description,
-                "Kostenbezeichnung": planned_label,
-                "Anzahl": planned_quantity,
-                "Einheit": planned_unit,
-                "Ist_Investition": "Ja" if planned_investment else "",
-                "Status": STATUS_PLANNED,
-                "Referenz_ID": "",
-                "Getraenk_Name": planned_getraenk_name if planned_category == "Getraenke" else "",
-                "Getraenk_Anzahl": planned_getraenk_anzahl if planned_category == "Getraenke" else "",
-                "Getraenk_Preis_Stueck": planned_getraenk_preis_stueck if planned_category == "Getraenke" else "",
-                "Getraenk_Zahlungsart": planned_getraenk_zahlungsart if planned_category == "Getraenke" else "",
-                "Musik_Zahlungstyp": "",
-                "Kaution_Betrag": "",
-            }
-            append_transaction(record)
-            st.success(f"Geplante Ausgabe ueber {format_euro(planned_amount)} wurde gespeichert.")
-            st.rerun()
-
+    # --- Offene geplante Ausgaben als Übersicht + Als-bezahlt-markieren ---
     planned_open_df = transactions_df[
         (transactions_df["Transaktions_Typ"] == PLANNED_EXPENSE_TYPE)
         & (transactions_df["Status"] == STATUS_PLANNED)
     ].copy()
 
-    if planned_open_df.empty:
-        st.info("Aktuell gibt es keine offenen geplanten Ausgaben.")
-    else:
+    if not planned_open_df.empty:
+        st.markdown("---")
+        st.markdown("#### Offene geplante Ausgaben")
         planned_display = planned_open_df[
             ["Name", "Faellig_Am", "Kategorie", "Kostenbezeichnung", "Anzahl", "Einheit", "Beschreibung", "Betrag", "Ist_Investition"]
         ].copy()
         planned_display["Faellig_Am"] = planned_display["Faellig_Am"].dt.strftime("%d.%m.%Y").fillna("-")
         planned_display["Betrag"] = planned_display["Betrag"].map(format_euro)
         planned_display["Anzahl"] = planned_display["Anzahl"].map(format_quantity)
-        planned_display["Ist_Investition"] = planned_display["Ist_Investition"].map(lambda value: "Ja" if value else "")
+        planned_display["Ist_Investition"] = planned_display["Ist_Investition"].map(lambda v: "Ja" if v else "")
         st.dataframe(planned_display, use_container_width=True, hide_index=True)
 
         selection_labels = {
             row["_sheet_row"]: (
-                f"{row['Name']} | {format_euro(row['Betrag'])} | "
-                f"{build_cost_label(row)} | "
-                f"faellig {row['Faellig_Am'].strftime('%d.%m.%Y') if pd.notna(row['Faellig_Am']) else '-'}"
+                f"{row['Name']} | {format_euro(row['Betrag'])} | {build_cost_label(row)} | "
+                f"fällig {row['Faellig_Am'].strftime('%d.%m.%Y') if pd.notna(row['Faellig_Am']) else '-'}"
             )
             for _, row in planned_open_df.iterrows()
         }
         selected_rows = st.multiselect(
-            "Welche geplanten Ausgaben wurden inzwischen vom Haus bezahlt?",
+            "Als vom Haus bezahlt markieren:",
             options=list(selection_labels.keys()),
             format_func=lambda row_id: selection_labels[row_id],
         )
         payment_date = st.date_input("Bezahlt am", value=date.today(), key="planned_payment_date")
-        if st.button("Ausgewaehlte Ausgaben als bezahlt markieren", type="primary"):
+        if st.button("Als bezahlt markieren", type="primary"):
             if not selected_rows:
-                st.warning("Bitte waehle mindestens eine geplante Ausgabe aus.")
+                st.warning("Bitte wähle mindestens eine geplante Ausgabe aus.")
             else:
                 for sheet_row in selected_rows:
                     mark_planned_as_paid(sheet_row, payment_date)
-                st.success("Die ausgewaehlten geplanten Ausgaben wurden als vom Haus bezahlt markiert.")
+                st.success("Markiert als vom Haus bezahlt.")
                 st.rerun()
 
 with edit_tab:
