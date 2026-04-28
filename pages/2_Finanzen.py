@@ -889,9 +889,9 @@ with edit_tab:
                     with gec1:
                         edit_getraenk_name = st.text_input("Getraenk (Name)", value=str(tx.get("Getraenk_Name", "") or ""))
                     with gec2:
-                        edit_getraenk_anzahl = st.number_input("Anzahl", min_value=0, step=1, value=int(tx.get("Getraenk_Anzahl", 0) or 0))
+                        edit_getraenk_anzahl = st.number_input("Anzahl", min_value=0, step=1, value=int(parse_quantity(tx.get("Getraenk_Anzahl", 0) or 0)))
                     with gec3:
-                        edit_getraenk_preis = st.number_input("Preis/Stueck", min_value=0.0, step=0.05, format="%.2f", value=float(tx.get("Getraenk_Preis_Stueck", 0.0) or 0.0))
+                        edit_getraenk_preis = st.number_input("Preis/Stueck", min_value=0.0, step=0.05, format="%.2f", value=parse_amount(tx.get("Getraenk_Preis_Stueck", 0.0) or 0.0))
                     za_idx = GETRAENKE_ZAHLUNGSART.index(tx.get("Getraenk_Zahlungsart", "")) if tx.get("Getraenk_Zahlungsart", "") in GETRAENKE_ZAHLUNGSART else 0
                     edit_getraenk_za = st.selectbox("Zahlungsart", GETRAENKE_ZAHLUNGSART, index=za_idx)
 
