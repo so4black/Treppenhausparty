@@ -1041,31 +1041,26 @@ with overview_tab:
 
     # --- Wasserfalldiagramm ---
     st.markdown("### Geldfluss")
-    wf_labels = ["Einzahlungen", "Ausgaben", "Liquide Mittel", "Auslagen offen", "Geplante Kosten", "Endbestand"]
-    wf_income = income_basis  # respektiert den Toggle
+    if ohne_anfang:
+        wf_labels   = ["Einzahlungen Personen", "Einnahmen Party", "Ausgaben", "Liquide Mittel", "Auslagen offen", "Geplante Kosten", "Endbestand"]
+        wf_measures = ["absolute", "relative", "relative", "total", "relative", "relative", "total"]
+        wf_y        = [people_deposits, party_income, -house_total_paid, liquide_mittel_angepasst, -open_to_people, -planned_total, balance_angepasst]
+        wf_text     = [format_euro(people_deposits), format_euro(party_income), format_euro(-house_total_paid), format_euro(liquide_mittel_angepasst), format_euro(-open_to_people), format_euro(-planned_total), format_euro(balance_angepasst)]
+    else:
+        wf_labels   = ["Anfangsbestand", "Einzahlungen Personen", "Einnahmen Party", "Ausgaben", "Liquide Mittel", "Auslagen offen", "Geplante Kosten", "Endbestand"]
+        wf_measures = ["absolute", "relative", "relative", "relative", "total", "relative", "relative", "total"]
+        wf_y        = [initial_house_funding, people_deposits, party_income, -house_total_paid, liquide_mittel_angepasst, -open_to_people, -planned_total, balance_angepasst]
+        wf_text     = [format_euro(initial_house_funding), format_euro(people_deposits), format_euro(party_income), format_euro(-house_total_paid), format_euro(liquide_mittel_angepasst), format_euro(-open_to_people), format_euro(-planned_total), format_euro(balance_angepasst)]
+
     waterfall_fig = go.Figure(
         go.Waterfall(
             name="Hauskonto",
             orientation="v",
-            measure=["absolute", "relative", "total", "relative", "relative", "total"],
+            measure=wf_measures,
             x=wf_labels,
             customdata=wf_labels,
-            y=[
-                wf_income,
-                -house_total_paid,
-                liquide_mittel_angepasst,
-                -open_to_people,
-                -planned_total,
-                balance_angepasst,
-            ],
-            text=[
-                format_euro(wf_income),
-                format_euro(-house_total_paid),
-                format_euro(liquide_mittel_angepasst),
-                format_euro(-open_to_people),
-                format_euro(-planned_total),
-                format_euro(balance_angepasst),
-            ],
+            y=wf_y,
+            text=wf_text,
             textposition="outside",
             increasing={"marker": {"color": "#15803d"}},
             decreasing={"marker": {"color": "#b91c1c"}},
@@ -1089,11 +1084,20 @@ with overview_tab:
         detail_df = None
         detail_title = ""
 
-        if clicked_label == "Einzahlungen":
+        if clicked_label == "Anfangsbestand":
+            detail_df = transactions_df[initial_house_funding_mask(transactions_df)].copy()
+            detail_title = "Anfangsbestand"
+        elif clicked_label == "Einzahlungen Personen":
             detail_df = transactions_df[
-                transactions_df["Transaktions_Typ"].isin(["Einzahlung auf das Haus", "Einnahmen (Party)"])
+                (transactions_df["Transaktions_Typ"] == "Einzahlung auf das Haus")
+                & (~initial_house_funding_mask(transactions_df))
             ].copy()
-            detail_title = "Einzahlungen & Einnahmen"
+            detail_title = "Einzahlungen Personen"
+        elif clicked_label == "Einnahmen Party":
+            detail_df = transactions_df[
+                transactions_df["Transaktions_Typ"] == "Einnahmen (Party)"
+            ].copy()
+            detail_title = "Einnahmen Party"
         elif clicked_label == "Ausgaben":
             detail_df = transactions_df[
                 party_expense_mask(transactions_df) | investment_expense_mask(transactions_df)
