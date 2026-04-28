@@ -1183,6 +1183,112 @@ with overview_tab:
                 detail_df["Betrag"] = detail_df["Betrag"].map(format_euro)
                 st.dataframe(detail_df[show_cols], use_container_width=True, hide_index=True)
 
+    # --- Einnahmen vs. Ausgaben Pie + Ansprüche pro Person ---
+    if not person_summary.empty or party_income > 0 or people_deposits > 0:
+        pie_col, bar_col = st.columns(2)
+
+        with pie_col:
+            st.markdown("### Einnahmen vs. Ausgaben")
+            pie_labels = ["Einzahlungen Personen", "Einnahmen Party", "Partykosten", "Investitionen", "Erstattungen"]
+            pie_values = [people_deposits, party_income, party_direct_spend, investment_direct_spend, reimbursements_paid]
+            pie_colors = ["#15803d", "#22c55e", "#b91c1c", "#f97316", "#6366f1"]
+            # nur Einträge > 0 zeigen
+            filtered = [(l, v, c) for l, v, c in zip(pie_labels, pie_values, pie_colors) if v > 0]
+            if filtered:
+                fl, fv, fc = zip(*filtered)
+                pie_fig = go.Figure(go.Pie(
+                    labels=fl,
+                    values=fv,
+                    marker={"colors": fc},
+                    textinfo="label+percent",
+                    hovertemplate="%{label}<br>%{value:,.2f} EUR<extra></extra>",
+                    hole=0.35,
+                ))
+                pie_fig.update_layout(
+                    height=320,
+                    margin={"l": 10, "r": 10, "t": 10, "b": 10},
+                    showlegend=False,
+                )
+                st.plotly_chart(pie_fig, use_container_width=True)
+
+        with bar_col:
+            st.markdown("### Ansprüche pro Person")
+            anspruch_df = person_summary[person_summary["Gesamtanspruch_gegen_Haus"] > 0].copy()
+            if anspruch_df.empty:
+                st.info("Alle Ansprüche beglichen.")
+            else:
+                anspruch_fig = go.Figure(go.Bar(
+                    x=anspruch_df["Gesamtanspruch_gegen_Haus"],
+                    y=anspruch_df["Name"],
+                    orientation="h",
+                    text=[format_euro(v) for v in anspruch_df["Gesamtanspruch_gegen_Haus"]],
+                    textposition="outside",
+                    customdata=list(zip(
+                        anspruch_df["Einzahlungen"],
+                        anspruch_df["Offene_Auslagen"],
+                    )),
+                    hovertemplate=(
+                        "<b>%{y}</b><br>"
+                        "Anspruch gesamt: %{x:,.2f} EUR<br>"
+                        "davon Einzahlung: %{customdata[0]:,.2f} EUR<br>"
+                        "davon offene Auslagen: %{customdata[1]:,.2f} EUR"
+                        "<extra></extra>"
+                    ),
+                    marker_color="#7c3aed",
+                ))
+                anspruch_fig.update_layout(
+                    height=320,
+                    margin={"l": 10, "r": 60, "t": 10, "b": 10},
+                    xaxis_title="EUR",
+                    yaxis_title="",
+                    showlegend=False,
+                    yaxis={"categoryorder": "total ascending"},
+                )
+                st.plotly_chart(anspruch_fig, use_container_width=True)
+
+    # --- Ausgaben-Timeline ---
+    all_expense_df = transactions_df[
+        party_expense_mask(transactions_df) | investment_expense_mask(transactions_df)
+    ].copy()
+    if not all_expense_df.empty and all_expense_df["Erfasst_Am"].notna().any():
+        st.markdown("### Ausgaben über Zeit")
+        timeline_df = all_expense_df.dropna(subset=["Erfasst_Am"]).copy()
+        timeline_df["Datum"] = timeline_df["Erfasst_Am"].dt.date
+        timeline_agg = (
+            timeline_df.groupby(["Datum", "Kategorie"])["Betrag"]
+            .sum()
+            .reset_index()
+            .sort_values("Datum")
+        )
+        kategorie_colors = {
+            "Getraenke": "#1d4ed8",
+            "Deko": "#db2777",
+            "Musik/Technik": "#7c3aed",
+            "Location": "#b45309",
+            "Umlage/Einzahlung": "#15803d",
+            "Einnahmen": "#22c55e",
+            "Sonstiges": "#64748b",
+        }
+        timeline_fig = go.Figure()
+        for kat in timeline_agg["Kategorie"].unique():
+            df_k = timeline_agg[timeline_agg["Kategorie"] == kat]
+            timeline_fig.add_trace(go.Bar(
+                x=df_k["Datum"].astype(str),
+                y=df_k["Betrag"],
+                name=kat,
+                marker_color=kategorie_colors.get(kat, "#94a3b8"),
+                hovertemplate=f"<b>{kat}</b><br>%{{x}}<br>%{{y:,.2f}} EUR<extra></extra>",
+            ))
+        timeline_fig.update_layout(
+            barmode="stack",
+            height=320,
+            margin={"l": 20, "r": 20, "t": 10, "b": 20},
+            yaxis_title="EUR",
+            xaxis_title="",
+            legend={"orientation": "h", "y": -0.2},
+        )
+        st.plotly_chart(timeline_fig, use_container_width=True)
+
     # --- Ausgaben nach Kategorie ---
     st.markdown("### Ausgaben nach Kategorie")
     ausgaben_df = transactions_df[
@@ -1198,6 +1304,7 @@ with overview_tab:
             text=[format_euro(v) for v in cat_sum["Betrag"]],
             textposition="outside",
             marker_color="#1d4ed8",
+            hovertemplate="<b>%{x}</b><br>%{y:,.2f} EUR<extra></extra>",
         ))
         cat_fig.update_layout(
             height=340,
@@ -1206,7 +1313,18 @@ with overview_tab:
             showlegend=False,
             xaxis_title="",
         )
-        st.plotly_chart(cat_fig, use_container_width=True)
+        cat_event = st.plotly_chart(cat_fig, use_container_width=True, on_select="rerun", key="cat_chart")
+        cat_points = (cat_event or {}).get("selection", {}).get("points", [])
+        if cat_points:
+            clicked_kat = cat_points[0].get("x", "")
+            if clicked_kat:
+                kat_detail = ausgaben_df[ausgaben_df["Kategorie"].astype(str) == clicked_kat].copy()
+                st.markdown(f"#### Einzelposten: {clicked_kat}")
+                kat_detail["Erfasst_Am"] = kat_detail["Erfasst_Am"].dt.strftime("%d.%m.%Y").fillna("-")
+                kat_detail["Betrag"] = kat_detail["Betrag"].map(format_euro)
+                show = ["Erfasst_Am", "Name", "Kategorie", "Kostenbezeichnung", "Beschreibung", "Betrag", "Bezahlt_Von", "Status"]
+                show = [c for c in show if c in kat_detail.columns]
+                st.dataframe(kat_detail[show], use_container_width=True, hide_index=True)
 
         st.markdown("### Kosten nach Bezeichnung")
         detail_df = ausgaben_df.copy()
@@ -1248,6 +1366,7 @@ with overview_tab:
                 ],
                 textposition="outside",
                 marker_color="#0f766e",
+                hovertemplate="<b>%{y}</b><br>%{x:,.2f} EUR<extra></extra>",
             )
         )
         detail_fig.update_layout(
