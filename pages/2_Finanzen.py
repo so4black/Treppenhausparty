@@ -25,6 +25,7 @@ TRANSACTION_TYPES = [
     "Einzahlung auf das Haus",
     "Rueckerstattung vom Haus",
     "Einnahmen (Party)",
+    "Verrechnung (Warenübernahme)",
 ]
 CATEGORY_OPTIONS = [
     "Getraenke",
@@ -521,6 +522,41 @@ with entry_tab:
             st.error("Bitte waehle einen Namen aus oder trage einen neuen Namen ein.")
         elif betrag <= 0 and kategorie not in ("Musik/Technik",) and not (kategorie == "Musik/Technik" and kaution_betrag > 0):
             st.error("Bitte gib einen Betrag groesser als 0 ein.")
+        elif transaktions_typ == "Verrechnung (Warenübernahme)":
+            # Betrag automatisch berechnen wenn Getraenke-Details ausgefuellt
+            final_betrag = float(betrag)
+            if kategorie == "Getraenke" and getraenk_anzahl > 0 and getraenk_preis_stueck > 0 and betrag == 0:
+                final_betrag = getraenk_anzahl * getraenk_preis_stueck
+            tx_id = make_transaction_id()
+            paid_at = date.today().strftime("%d.%m.%Y")
+            base_record = {
+                "Erfasst_Am": paid_at,
+                "Faellig_Am": "",
+                "Bezahlt_Am": paid_at,
+                "Betrag": final_betrag,
+                "Kategorie": kategorie,
+                "Beschreibung": beschreibung,
+                "Kostenbezeichnung": kostenbezeichnung,
+                "Anzahl": anzahl,
+                "Einheit": einheit,
+                "Ist_Investition": "",
+                "Status": STATUS_DONE,
+                "Getraenk_Name": getraenk_name,
+                "Getraenk_Anzahl": getraenk_anzahl if kategorie == "Getraenke" else "",
+                "Getraenk_Preis_Stueck": getraenk_preis_stueck if kategorie == "Getraenke" else "",
+                "Getraenk_Zahlungsart": getraenk_zahlungsart if kategorie == "Getraenke" else "",
+                "Musik_Zahlungstyp": "",
+                "Kaution_Betrag": "",
+            }
+            # 1) Einnahme für das Haus
+            einnahme_record = {**base_record, "ID": tx_id, "Name": HOUSE_PAYER, "Transaktions_Typ": "Einnahmen (Party)", "Bezahlt_Von": HOUSE_PAYER, "Referenz_ID": tx_id}
+            # 2) Erstattung an die Person (verrechnet deren Anspruch)
+            erstattung_id = make_transaction_id()
+            erstattung_record = {**base_record, "ID": erstattung_id, "Name": final_name, "Transaktions_Typ": "Rueckerstattung vom Haus", "Bezahlt_Von": HOUSE_PAYER, "Referenz_ID": tx_id}
+            append_transaction(einnahme_record)
+            append_transaction(erstattung_record)
+            st.success(f"Verrechnung über {format_euro(final_betrag)} für {final_name} gespeichert (Einnahme + Erstattung).")
+            st.rerun()
         else:
             status = STATUS_DONE
             paid_by = bezahlt_von
@@ -792,6 +828,9 @@ with edit_tab:
             # Kategorie außerhalb des Forms für live Felder
             edit_kat_idx = CATEGORY_OPTIONS.index(tx["Kategorie"]) if tx["Kategorie"] in CATEGORY_OPTIONS else 0
             edit_kategorie = st.selectbox("Kategorie", CATEGORY_OPTIONS, index=edit_kat_idx, key="edit_kategorie")
+
+            if tx["Transaktions_Typ"] == "Verrechnung (Warenübernahme)":
+                st.info("Verrechnungen bestehen aus zwei verknüpften Transaktionen (Einnahme + Erstattung). Bitte lösche und korrigiere beide Einträge einzeln im Transaktionsprotokoll.")
 
             with st.form("edit_form"):
                 ecf1, ecf2 = st.columns(2)
