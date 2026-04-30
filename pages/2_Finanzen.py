@@ -1,4 +1,5 @@
 import json
+import math
 from datetime import date, datetime
 from pathlib import Path
 
@@ -18,10 +19,13 @@ STATUS_OPEN = "Offen"
 STATUS_DONE = "Erledigt"
 STATUS_PLANNED = "Geplant"
 STATUS_PAID_BY_HOUSE = "Vom Haus bezahlt"
+PLANNED_EXPENSE_TYPE = "Geplante Ausgabe"
 TRANSACTION_TYPES = [
     "Ausgabe/Einkauf",
     "Einzahlung auf das Haus",
     "Rueckerstattung vom Haus",
+    "Einnahmen (Party)",
+    "Verrechnung (Warenübernahme)",
 ]
 CATEGORY_OPTIONS = [
     "Getraenke",
@@ -29,11 +33,22 @@ CATEGORY_OPTIONS = [
     "Musik/Technik",
     "Location",
     "Umlage/Einzahlung",
+    "Einnahmen",
     "Sonstiges",
 ]
 GETRAENKE_ZAHLUNGSART = ["Vorkasse", "Auf Kommission"]
+KATEGORIE_COLORS = {
+    "Getraenke": "#1d4ed8",
+    "Deko": "#db2777",
+    "Musik/Technik": "#7c3aed",
+    "Location": "#b45309",
+    "Umlage/Einzahlung": "#15803d",
+    "Einnahmen": "#22c55e",
+    "Sonstiges": "#64748b",
+}
 MUSIK_ZAHLUNGSTYP = ["Normaler Betrag", "Kaution", "Kaution + Betrag"]
 STANDARD_NAMES = [
+    HOUSE_PAYER,
     "Freddy",
     "Divin",
     "Chrissi",
@@ -46,6 +61,12 @@ STANDARD_NAMES = [
     "Michelle",
     "Finn",
 ]
+HOUSE_NAME_ALIASES = {
+    HOUSE_PAYER,
+    "Altes Polizeipraesidium (Kassenstand Anfang)",
+    "Altes Polizeipräsidum (Kassenstand Anfang)",
+    "Altes Polizeipräsidium (Kassenstand Anfang)",
+}
 HEADER_ROW = [
     "ID",
     "Erfasst_Am",
@@ -57,6 +78,10 @@ HEADER_ROW = [
     "Kategorie",
     "Bezahlt_Von",
     "Beschreibung",
+    "Kostenbezeichnung",
+    "Anzahl",
+    "Einheit",
+    "Ist_Investition",
     "Status",
     "Referenz_ID",
     "Getraenk_Name",
@@ -93,6 +118,74 @@ def parse_amount(value):
         return float(text)
     except ValueError:
         return 0.0
+
+
+def parse_quantity(value):
+    text = str(value).strip()
+    if not text:
+        return 0.0
+    text = text.replace(",", ".")
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def parse_bool(value) -> bool:
+    return str(value).strip().lower() in {"1", "true", "ja", "yes", "y"}
+
+
+def format_quantity(value) -> str:
+    if value is None or pd.isna(value) or float(value) == 0:
+        return "-"
+    value = float(value)
+    if value.is_integer():
+        return str(int(value))
+    return f"{value:.2f}".replace(".", ",")
+
+
+def build_cost_label(row: pd.Series) -> str:
+    for column in ["Kostenbezeichnung", "Getraenk_Name", "Beschreibung"]:
+        value = str(row.get(column, "")).strip()
+        if value:
+            return value
+    return "Ohne Bezeichnung"
+
+
+def format_date_value(value) -> str:
+    if value is None or pd.isna(value) or str(value).strip() == "":
+        return ""
+    if isinstance(value, pd.Timestamp):
+        return value.strftime("%d.%m.%Y")
+    return str(value)
+
+
+def to_sheet_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, pd.Timestamp):
+        return value.strftime("%d.%m.%Y")
+    if isinstance(value, (datetime, date)):
+        return value.strftime("%d.%m.%Y")
+    if pd.isna(value):
+        return ""
+    if isinstance(value, bool):
+        return "Ja" if value else ""
+    if hasattr(value, "item"):
+        value = value.item()
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return ""
+        return value
+    return value
+
+
+def column_index_to_letter(index: int) -> str:
+    letters = []
+    while index > 0:
+        index, remainder = divmod(index - 1, 26)
+        letters.append(chr(65 + remainder))
+    return "".join(reversed(letters))
 
 
 def get_gspread_client():
@@ -140,7 +233,7 @@ def get_worksheet():
 def ensure_header(worksheet):
     current_header = worksheet.row_values(1)
     if current_header[: len(HEADER_ROW)] != HEADER_ROW:
-        col_letter = chr(ord("A") + len(HEADER_ROW) - 1)
+        col_letter = column_index_to_letter(len(HEADER_ROW))
         worksheet.update(f"A1:{col_letter}1", [HEADER_ROW])
 
 
@@ -165,8 +258,21 @@ def load_transactions():
 
     df = pd.DataFrame(data_rows)
     df["Betrag"] = df["Betrag"].apply(parse_amount)
+    for col in ["Anzahl", "Getraenk_Anzahl"]:
+        if col in df.columns:
+            df[col] = df[col].apply(parse_quantity)
+    if "Ist_Investition" in df.columns:
+        df["Ist_Investition"] = df["Ist_Investition"].apply(parse_bool)
+    else:
+        df["Ist_Investition"] = False
     for col in ["Erfasst_Am", "Faellig_Am", "Bezahlt_Am"]:
         df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+    if "Kostenbezeichnung" not in df.columns:
+        df["Kostenbezeichnung"] = ""
+    if "Anzahl" not in df.columns:
+        df["Anzahl"] = 0.0
+    if "Einheit" not in df.columns:
+        df["Einheit"] = ""
     return df
 
 
@@ -187,10 +293,19 @@ def mark_planned_as_paid(sheet_row: int, payment_date: date):
 
 def update_transaction(sheet_row: int, record: dict):
     worksheet = get_worksheet()
-    col_index = {column: idx + 1 for idx, column in enumerate(HEADER_ROW)}
+    current_values = worksheet.row_values(sheet_row)
+    padded_values = current_values[: len(HEADER_ROW)] + [""] * (len(HEADER_ROW) - len(current_values))
+    row_record = dict(zip(HEADER_ROW, padded_values))
     for field, value in record.items():
-        if field in col_index:
-            worksheet.update_cell(sheet_row, col_index[field], value)
+        if field in row_record:
+            row_record[field] = to_sheet_value(value)
+    row_values = [row_record.get(column, "") for column in HEADER_ROW]
+    end_col = column_index_to_letter(len(HEADER_ROW))
+    worksheet.update(
+        f"A{sheet_row}:{end_col}{sheet_row}",
+        [row_values],
+        value_input_option="USER_ENTERED",
+    )
     load_transactions.clear()
 
 
@@ -218,12 +333,15 @@ def build_name_options(df: pd.DataFrame):
 
 def build_person_summary(df: pd.DataFrame) -> pd.DataFrame:
     people_df = df[df["Name"].astype(str).str.strip() != ""].copy()
+    people_df = people_df[~people_df["Name"].astype(str).isin(HOUSE_NAME_ALIASES)]
     if people_df.empty:
         return pd.DataFrame(
             columns=[
                 "Name",
                 "Einzahlungen",
-                "Privat_vorgelegt",
+                "Privat_vorgelegt_Party",
+                "Privat_vorgelegt_Investition",
+                "Privat_vorgelegt_Gesamt",
                 "Rueckerstattungen",
                 "Guthaben_im_Haus",
                 "Offene_Auslagen",
@@ -237,10 +355,20 @@ def build_person_summary(df: pd.DataFrame) -> pd.DataFrame:
         .groupby("Name")["Betrag"]
         .sum()
     )
-    private_spend = (
+    private_party_spend = (
         people_df[
             (people_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
             & (people_df["Bezahlt_Von"] == PRIVATE_PAYER)
+            & (~people_df["Ist_Investition"].fillna(False))
+        ]
+        .groupby("Name")["Betrag"]
+        .sum()
+    )
+    private_investment_spend = (
+        people_df[
+            (people_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
+            & (people_df["Bezahlt_Von"] == PRIVATE_PAYER)
+            & (people_df["Ist_Investition"].fillna(False))
         ]
         .groupby("Name")["Betrag"]
         .sum()
@@ -261,44 +389,156 @@ def build_person_summary(df: pd.DataFrame) -> pd.DataFrame:
 
     summary = pd.DataFrame(index=sorted(people_df["Name"].dropna().unique()))
     summary["Einzahlungen"] = income
-    summary["Privat_vorgelegt"] = private_spend
+    summary["Privat_vorgelegt_Party"] = private_party_spend
+    summary["Privat_vorgelegt_Investition"] = private_investment_spend
     summary["Rueckerstattungen"] = refunds
     summary["Geplante_Ausgaben"] = planned
     summary = summary.fillna(0.0)
-    summary["Guthaben_im_Haus"] = summary["Einzahlungen"]
-    summary["Offene_Auslagen"] = summary["Privat_vorgelegt"] - summary["Rueckerstattungen"]
-    summary["Offene_Auslagen"] = summary["Offene_Auslagen"].clip(lower=0.0)
+    summary["Privat_vorgelegt_Gesamt"] = (
+        summary["Privat_vorgelegt_Party"] + summary["Privat_vorgelegt_Investition"]
+    )
+    # Erstattungen decken zuerst offene Auslagen, dann die Einzahlung (Guthaben)
+    raw_auslagen = summary["Privat_vorgelegt_Gesamt"] - summary["Rueckerstattungen"]
+    summary["Offene_Auslagen"] = raw_auslagen.clip(lower=0.0)
+    # Überschuss-Erstattungen (mehr erstattet als vorgelegt) mindern das Guthaben
+    ueberschuss_erstattung = (-raw_auslagen).clip(lower=0.0)
+    summary["Guthaben_im_Haus"] = (summary["Einzahlungen"] - ueberschuss_erstattung).clip(lower=0.0)
     summary["Gesamtanspruch_gegen_Haus"] = summary["Guthaben_im_Haus"] + summary["Offene_Auslagen"]
     summary = summary.reset_index().rename(columns={"index": "Name"})
-    return summary.sort_values(["Gesamtanspruch_gegen_Haus", "Privat_vorgelegt"], ascending=[False, False])
+    return summary.sort_values(["Gesamtanspruch_gegen_Haus", "Privat_vorgelegt_Gesamt"], ascending=[False, False])
 
 
-st.set_page_config(page_title="Treppenhausparty - Finanzen", page_icon="EUR", layout="wide")
-st.title("Treppenhausparty - Finanzuebersicht")
+def party_expense_mask(df: pd.DataFrame) -> pd.Series:
+    is_party_spend = (
+        (df["Transaktions_Typ"] == "Ausgabe/Einkauf")
+        | (
+            (df["Transaktions_Typ"] == "Geplante Ausgabe")
+            & (df["Status"] == STATUS_PAID_BY_HOUSE)
+        )
+    )
+    return is_party_spend & (~df["Ist_Investition"].fillna(False))
+
+
+def planned_party_mask(df: pd.DataFrame) -> pd.Series:
+    is_planned_party = (
+        (df["Transaktions_Typ"] == "Geplante Ausgabe")
+        & (df["Status"] == STATUS_PLANNED)
+    )
+    return is_planned_party & (~df["Ist_Investition"].fillna(False))
+
+
+def investment_expense_mask(df: pd.DataFrame) -> pd.Series:
+    is_investment_spend = (
+        (df["Transaktions_Typ"] == "Ausgabe/Einkauf")
+        | (
+            (df["Transaktions_Typ"] == PLANNED_EXPENSE_TYPE)
+            & (df["Status"] == STATUS_PAID_BY_HOUSE)
+        )
+    )
+    return is_investment_spend & (df["Ist_Investition"].fillna(False))
+
+
+def initial_house_funding_mask(df: pd.DataFrame) -> pd.Series:
+    return (
+        (df["Transaktions_Typ"] == "Einzahlung auf das Haus")
+        & (df["Name"].astype(str).isin(HOUSE_NAME_ALIASES))
+    )
+
+
+st.set_page_config(page_title="THP Finanzen", page_icon="💰", layout="wide")
+st.title("Treppenhausparty – Finanzen")
 st.caption("Einzahlungen, Ausgaben, offene Erstattungen und geplante Kosten an einem Ort.")
 
 transactions_df = load_transactions()
 name_options = build_name_options(transactions_df)
 
-entry_tab, planned_tab, edit_tab, overview_tab = st.tabs(
-    ["Transaktion eintragen", "Geplante Ausgaben", "Bearbeiten / Loeschen", "Uebersicht"]
+entry_tab, edit_tab, overview_tab = st.tabs(
+    ["Eintragen", "Bearbeiten / Löschen", "Übersicht"]
 )
 
+# ---------------------------------------------------------------------------
+# EINTRAGEN-TAB
+# ---------------------------------------------------------------------------
 with entry_tab:
     st.subheader("Neue Transaktion")
 
-    # Kategorie außerhalb des Forms, damit die Zusatzfelder live erscheinen
-    kategorie = st.selectbox("Kategorie", CATEGORY_OPTIONS, key="entry_kategorie")
+    # Typ-Auswahl außerhalb des Forms (steuert sichtbare Felder)
+    ENTRY_TYPES = {
+        "Ausgabe": "Ausgabe/Einkauf",
+        "Einzahlung": "Einzahlung auf das Haus",
+        "Erstattung": "Rueckerstattung vom Haus",
+        "Einnahme (Party)": "Einnahmen (Party)",
+        "Verrechnung": "Verrechnung (Warenübernahme)",
+    }
+    entry_type_label = st.radio(
+        "Was möchtest du eintragen?",
+        list(ENTRY_TYPES.keys()),
+        horizontal=True,
+        key="entry_type_label",
+    )
+    entry_type = ENTRY_TYPES[entry_type_label]
+
+    # Kategorie nur für Ausgaben & Verrechnung sinnvoll
+    needs_category = entry_type_label in ("Ausgabe", "Verrechnung")
+    needs_person = entry_type_label != "Einnahme (Party)"  # Einnahme → immer "Das Haus"
+
+    if needs_category:
+        entry_kategorie = st.selectbox("Kategorie", CATEGORY_OPTIONS, key="entry_kategorie")
+    else:
+        entry_kategorie = "Sonstiges"
 
     with st.form("transaktion_form", clear_on_submit=True):
-        transaktions_typ = st.selectbox("Was moechtest du eintragen?", TRANSACTION_TYPES)
-        name_auswahl = st.selectbox("Wer traegt es ein / um wen geht es?", name_options)
-        st.caption("Falls 'Neuen Namen hinzufuegen...' gewaehlt wurde:")
-        neuer_name = st.text_input("Neuer Name")
 
-        betrag = st.number_input("Betrag in EUR", min_value=0.0, step=0.5, format="%.2f")
+        # Person
+        if needs_person:
+            name_col, new_col = st.columns([2, 1])
+            with name_col:
+                name_auswahl = st.selectbox("Person", name_options)
+            with new_col:
+                neuer_name = st.text_input("Neuer Name (falls oben letzte Option)")
+        else:
+            name_auswahl = HOUSE_PAYER
+            neuer_name = ""
 
-        # --- Kategorie-spezifische Zusatzfelder ---
+        # Betrag & Bezeichnung
+        bez_col, amt_col = st.columns([2, 1])
+        with bez_col:
+            kostenbezeichnung = st.text_input(
+                "Bezeichnung",
+                placeholder="z.B. Bier, Kabelbinder, Kuehlschrank",
+            )
+        with amt_col:
+            betrag = st.number_input("Betrag in EUR", min_value=0.0, step=0.5, format="%.2f")
+
+        # Menge (nur bei Ausgabe)
+        if entry_type_label == "Ausgabe":
+            mq1, mq2, mq3, mq4 = st.columns([1, 1, 1, 1.2])
+            with mq1:
+                anzahl = st.number_input("Anzahl", min_value=0.0, step=1.0, format="%.2f")
+            with mq2:
+                einheit = st.text_input("Einheit", placeholder="z.B. Stk., Kisten")
+            with mq3:
+                ist_geplant = st.checkbox("Geplant (noch nicht bezahlt)", help="Trägt die Ausgabe als geplante Kosten ein.")
+            with mq4:
+                ist_investition = st.checkbox("Investition", help="Investitionen tauchen nicht als Partykosten auf.")
+            if ist_geplant:
+                due_date = st.date_input("Fällig am", value=date.today())
+            else:
+                due_date = None
+        else:
+            anzahl = 0.0
+            einheit = ""
+            ist_geplant = False
+            ist_investition = False
+            due_date = None
+
+        # Wer hat gezahlt? (nur bei Ausgabe relevant)
+        if entry_type_label == "Ausgabe":
+            bezahlt_von = st.radio("Wer hat gezahlt?", [HOUSE_PAYER, PRIVATE_PAYER], horizontal=True)
+        else:
+            bezahlt_von = HOUSE_PAYER
+
+        # Getränke-Details
         getraenk_name = ""
         getraenk_anzahl = 0
         getraenk_preis_stueck = 0.0
@@ -306,178 +546,147 @@ with entry_tab:
         musik_zahlungstyp = ""
         kaution_betrag = 0.0
 
-        if kategorie == "Getraenke":
-            st.markdown("**Getraenke-Details**")
+        if needs_category and entry_kategorie == "Getraenke":
+            st.markdown("**Getränke-Details**")
             gcol1, gcol2, gcol3 = st.columns(3)
             with gcol1:
-                getraenk_name = st.text_input("Getraenk (Name)", placeholder="z.B. Bier, Mate, Prosecco")
+                getraenk_name = st.text_input("Getränk", placeholder="z.B. Bier, Mate")
             with gcol2:
-                getraenk_anzahl = st.number_input("Anzahl (Flaschen/Kaesten)", min_value=0, step=1)
+                getraenk_anzahl = st.number_input("Anzahl (Fl./Kästen)", min_value=0, step=1)
             with gcol3:
-                getraenk_preis_stueck = st.number_input("Preis pro Stueck in EUR", min_value=0.0, step=0.05, format="%.2f")
+                getraenk_preis_stueck = st.number_input("Preis/Stück EUR", min_value=0.0, step=0.05, format="%.2f")
             getraenk_zahlungsart = st.selectbox("Zahlungsart", GETRAENKE_ZAHLUNGSART)
 
-        elif kategorie == "Musik/Technik":
+        elif needs_category and entry_kategorie == "Musik/Technik":
             st.markdown("**Musik/Technik-Details**")
             musik_zahlungstyp = st.selectbox("Art der Zahlung", MUSIK_ZAHLUNGSTYP)
             if musik_zahlungstyp in ("Kaution", "Kaution + Betrag"):
-                kaution_betrag = st.number_input(
-                    "Kautionsbetrag in EUR",
-                    min_value=0.0,
-                    step=10.0,
-                    format="%.2f",
-                    help="Kaution wird separat erfasst und erscheint in der Uebersicht als rueckerstattbar.",
-                )
+                kaution_betrag = st.number_input("Kautionsbetrag EUR", min_value=0.0, step=10.0, format="%.2f")
 
-        bezahlt_von = st.radio(
-            "Wer hat gezahlt?",
-            [HOUSE_PAYER, PRIVATE_PAYER],
-            horizontal=True,
-        )
-        beschreibung = st.text_area("Beschreibung", placeholder="z.B. Becher, Kabel, Deko")
-        submitted = st.form_submit_button("Transaktion speichern")
+        beschreibung = st.text_area("Beschreibung / Notiz", placeholder="z.B. Becher, Kabel, Deko")
+        submitted = st.form_submit_button("💾 Speichern", type="primary")
 
     if submitted:
-        final_name = resolve_name(name_auswahl, neuer_name)
+        final_name = resolve_name(name_auswahl, neuer_name) if needs_person else HOUSE_PAYER
+
+        # Betrag auto-berechnen aus Getränke-Details
+        final_betrag = float(betrag)
+        if entry_kategorie == "Getraenke" and getraenk_anzahl > 0 and getraenk_preis_stueck > 0 and betrag == 0:
+            final_betrag = getraenk_anzahl * getraenk_preis_stueck
 
         if not final_name:
-            st.error("Bitte waehle einen Namen aus oder trage einen neuen Namen ein.")
-        elif betrag <= 0 and kategorie not in ("Musik/Technik",) and not (kategorie == "Musik/Technik" and kaution_betrag > 0):
-            st.error("Bitte gib einen Betrag groesser als 0 ein.")
-        else:
-            status = STATUS_DONE
-            paid_by = bezahlt_von
+            st.error("Bitte wähle eine Person aus oder trage einen neuen Namen ein.")
+        elif final_betrag <= 0 and not (entry_kategorie == "Musik/Technik" and kaution_betrag > 0):
+            st.error("Bitte gib einen Betrag größer als 0 ein.")
+        elif entry_type == "Verrechnung (Warenübernahme)":
+            tx_id = make_transaction_id()
             paid_at = date.today().strftime("%d.%m.%Y")
-
-            if transaktions_typ == "Ausgabe/Einkauf" and bezahlt_von == PRIVATE_PAYER:
-                status = STATUS_OPEN
-            elif transaktions_typ == "Einzahlung auf das Haus":
-                paid_by = final_name
-            elif transaktions_typ == "Rueckerstattung vom Haus":
-                paid_by = HOUSE_PAYER
-
-            # Betrag automatisch berechnen wenn Getraenke-Details ausgefuellt
-            final_betrag = float(betrag)
-            if kategorie == "Getraenke" and getraenk_anzahl > 0 and getraenk_preis_stueck > 0 and betrag == 0:
-                final_betrag = getraenk_anzahl * getraenk_preis_stueck
+            base = {
+                "Erfasst_Am": paid_at, "Faellig_Am": "", "Bezahlt_Am": paid_at,
+                "Betrag": final_betrag, "Kategorie": entry_kategorie,
+                "Beschreibung": beschreibung, "Kostenbezeichnung": kostenbezeichnung,
+                "Anzahl": anzahl, "Einheit": einheit, "Ist_Investition": "",
+                "Status": STATUS_DONE,
+                "Getraenk_Name": getraenk_name,
+                "Getraenk_Anzahl": getraenk_anzahl if entry_kategorie == "Getraenke" else "",
+                "Getraenk_Preis_Stueck": getraenk_preis_stueck if entry_kategorie == "Getraenke" else "",
+                "Getraenk_Zahlungsart": getraenk_zahlungsart if entry_kategorie == "Getraenke" else "",
+                "Musik_Zahlungstyp": "", "Kaution_Betrag": "",
+            }
+            append_transaction({**base, "ID": tx_id, "Name": HOUSE_PAYER, "Transaktions_Typ": "Einnahmen (Party)", "Bezahlt_Von": HOUSE_PAYER, "Referenz_ID": tx_id})
+            append_transaction({**base, "ID": make_transaction_id(), "Name": final_name, "Transaktions_Typ": "Rueckerstattung vom Haus", "Bezahlt_Von": HOUSE_PAYER, "Referenz_ID": tx_id})
+            st.success(f"Verrechnung über {format_euro(final_betrag)} für {final_name} gespeichert.")
+            st.rerun()
+        else:
+            paid_at = date.today().strftime("%d.%m.%Y")
+            if ist_geplant:
+                tx_typ = PLANNED_EXPENSE_TYPE
+                status = STATUS_PLANNED
+                paid_by = ""
+                paid_at_val = ""
+                faellig = due_date.strftime("%d.%m.%Y") if due_date else ""
+            else:
+                tx_typ = entry_type
+                faellig = ""
+                paid_at_val = paid_at
+                if entry_type == "Ausgabe/Einkauf" and bezahlt_von == PRIVATE_PAYER:
+                    status = STATUS_OPEN
+                    paid_by = PRIVATE_PAYER
+                elif entry_type == "Einzahlung auf das Haus":
+                    status = STATUS_DONE
+                    paid_by = final_name
+                else:
+                    status = STATUS_DONE
+                    paid_by = HOUSE_PAYER
 
             record = {
                 "ID": make_transaction_id(),
-                "Erfasst_Am": date.today().strftime("%d.%m.%Y"),
-                "Faellig_Am": "",
-                "Bezahlt_Am": paid_at,
+                "Erfasst_Am": paid_at,
+                "Faellig_Am": faellig,
+                "Bezahlt_Am": paid_at_val,
                 "Name": final_name,
-                "Transaktions_Typ": transaktions_typ,
+                "Transaktions_Typ": tx_typ,
                 "Betrag": final_betrag,
-                "Kategorie": kategorie,
+                "Kategorie": entry_kategorie,
                 "Bezahlt_Von": paid_by,
                 "Beschreibung": beschreibung,
+                "Kostenbezeichnung": kostenbezeichnung,
+                "Anzahl": anzahl,
+                "Einheit": einheit,
+                "Ist_Investition": "Ja" if ist_investition else "",
                 "Status": status,
                 "Referenz_ID": "",
                 "Getraenk_Name": getraenk_name,
-                "Getraenk_Anzahl": getraenk_anzahl if kategorie == "Getraenke" else "",
-                "Getraenk_Preis_Stueck": getraenk_preis_stueck if kategorie == "Getraenke" else "",
-                "Getraenk_Zahlungsart": getraenk_zahlungsart if kategorie == "Getraenke" else "",
-                "Musik_Zahlungstyp": musik_zahlungstyp if kategorie == "Musik/Technik" else "",
-                "Kaution_Betrag": kaution_betrag if kategorie == "Musik/Technik" else "",
+                "Getraenk_Anzahl": getraenk_anzahl if entry_kategorie == "Getraenke" else "",
+                "Getraenk_Preis_Stueck": getraenk_preis_stueck if entry_kategorie == "Getraenke" else "",
+                "Getraenk_Zahlungsart": getraenk_zahlungsart if entry_kategorie == "Getraenke" else "",
+                "Musik_Zahlungstyp": musik_zahlungstyp if entry_kategorie == "Musik/Technik" else "",
+                "Kaution_Betrag": kaution_betrag if entry_kategorie == "Musik/Technik" else "",
             }
             append_transaction(record)
             anzeige_betrag = final_betrag if final_betrag > 0 else kaution_betrag
-            st.success(f"{format_euro(anzeige_betrag)} fuer {final_name} wurde gespeichert.")
+            label = "Geplante Ausgabe" if ist_geplant else entry_type_label
+            st.success(f"{label}: {format_euro(anzeige_betrag)} für {final_name} gespeichert.")
             st.rerun()
 
-with planned_tab:
-    st.subheader("Zukuenftige Ausgaben erfassen")
-    st.caption("Geplante Kosten bleiben sichtbar, bis sie spaeter vom Haus bezahlt werden.")
-
-    with st.form("planned_expense_form", clear_on_submit=True):
-        planned_name = st.selectbox("Wer meldet die geplante Ausgabe?", name_options, key="planned_name")
-        st.caption("Falls 'Neuen Namen hinzufuegen...' gewaehlt wurde:")
-        planned_new_name = st.text_input("Neuer Name fuer geplante Ausgabe")
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            planned_amount = st.number_input(
-                "Geplanter Betrag in EUR",
-                min_value=0.0,
-                step=0.5,
-                format="%.2f",
-                key="planned_amount",
-            )
-        with col2:
-            planned_category = st.selectbox("Kategorie", CATEGORY_OPTIONS, key="planned_category")
-        with col3:
-            due_date = st.date_input("Faellig am", value=date.today(), key="planned_due_date")
-
-        planned_description = st.text_area(
-            "Beschreibung der geplanten Ausgabe",
-            placeholder="z.B. Restgetraenke, Leihtechnik, Reinigung",
-            key="planned_description",
-        )
-        planned_submit = st.form_submit_button("Geplante Ausgabe speichern")
-
-    if planned_submit:
-        final_name = resolve_name(planned_name, planned_new_name)
-
-        if not final_name:
-            st.error("Bitte waehle einen Namen aus oder trage einen neuen Namen ein.")
-        elif planned_amount <= 0:
-            st.error("Bitte gib einen Betrag groesser als 0 ein.")
-        else:
-            record = {
-                "ID": make_transaction_id(),
-                "Erfasst_Am": date.today().strftime("%d.%m.%Y"),
-                "Faellig_Am": due_date.strftime("%d.%m.%Y"),
-                "Bezahlt_Am": "",
-                "Name": final_name,
-                "Transaktions_Typ": "Geplante Ausgabe",
-                "Betrag": float(planned_amount),
-                "Kategorie": planned_category,
-                "Bezahlt_Von": "",
-                "Beschreibung": planned_description,
-                "Status": STATUS_PLANNED,
-                "Referenz_ID": "",
-            }
-            append_transaction(record)
-            st.success(f"Geplante Ausgabe ueber {format_euro(planned_amount)} wurde gespeichert.")
-            st.rerun()
-
+    # --- Offene geplante Ausgaben als Übersicht + Als-bezahlt-markieren ---
     planned_open_df = transactions_df[
-        (transactions_df["Transaktions_Typ"] == "Geplante Ausgabe")
+        (transactions_df["Transaktions_Typ"] == PLANNED_EXPENSE_TYPE)
         & (transactions_df["Status"] == STATUS_PLANNED)
     ].copy()
 
-    if planned_open_df.empty:
-        st.info("Aktuell gibt es keine offenen geplanten Ausgaben.")
-    else:
+    if not planned_open_df.empty:
+        st.markdown("---")
+        st.markdown("#### Offene geplante Ausgaben")
         planned_display = planned_open_df[
-            ["Name", "Faellig_Am", "Kategorie", "Beschreibung", "Betrag"]
+            ["Name", "Faellig_Am", "Kategorie", "Kostenbezeichnung", "Anzahl", "Einheit", "Beschreibung", "Betrag", "Ist_Investition"]
         ].copy()
         planned_display["Faellig_Am"] = planned_display["Faellig_Am"].dt.strftime("%d.%m.%Y").fillna("-")
         planned_display["Betrag"] = planned_display["Betrag"].map(format_euro)
+        planned_display["Anzahl"] = planned_display["Anzahl"].map(format_quantity)
+        planned_display["Ist_Investition"] = planned_display["Ist_Investition"].map(lambda v: "Ja" if v else "")
         st.dataframe(planned_display, use_container_width=True, hide_index=True)
 
         selection_labels = {
             row["_sheet_row"]: (
-                f"{row['Name']} | {format_euro(row['Betrag'])} | "
-                f"{row['Beschreibung'] or row['Kategorie']} | "
-                f"faellig {row['Faellig_Am'].strftime('%d.%m.%Y') if pd.notna(row['Faellig_Am']) else '-'}"
+                f"{row['Name']} | {format_euro(row['Betrag'])} | {build_cost_label(row)} | "
+                f"fällig {row['Faellig_Am'].strftime('%d.%m.%Y') if pd.notna(row['Faellig_Am']) else '-'}"
             )
             for _, row in planned_open_df.iterrows()
         }
         selected_rows = st.multiselect(
-            "Welche geplanten Ausgaben wurden inzwischen vom Haus bezahlt?",
+            "Als vom Haus bezahlt markieren:",
             options=list(selection_labels.keys()),
             format_func=lambda row_id: selection_labels[row_id],
         )
         payment_date = st.date_input("Bezahlt am", value=date.today(), key="planned_payment_date")
-        if st.button("Ausgewaehlte Ausgaben als bezahlt markieren", type="primary"):
+        if st.button("Als bezahlt markieren", type="primary"):
             if not selected_rows:
-                st.warning("Bitte waehle mindestens eine geplante Ausgabe aus.")
+                st.warning("Bitte wähle mindestens eine geplante Ausgabe aus.")
             else:
                 for sheet_row in selected_rows:
                     mark_planned_as_paid(sheet_row, payment_date)
-                st.success("Die ausgewaehlten geplanten Ausgaben wurden als vom Haus bezahlt markiert.")
+                st.success("Markiert als vom Haus bezahlt.")
                 st.rerun()
 
 with edit_tab:
@@ -535,23 +744,51 @@ with edit_tab:
             edit_kat_idx = CATEGORY_OPTIONS.index(tx["Kategorie"]) if tx["Kategorie"] in CATEGORY_OPTIONS else 0
             edit_kategorie = st.selectbox("Kategorie", CATEGORY_OPTIONS, index=edit_kat_idx, key="edit_kategorie")
 
+            if tx["Transaktions_Typ"] == "Verrechnung (Warenübernahme)":
+                st.info("Verrechnungen bestehen aus zwei verknüpften Transaktionen (Einnahme + Erstattung). Bitte lösche und korrigiere beide Einträge einzeln im Transaktionsprotokoll.")
+
             with st.form("edit_form"):
                 ecf1, ecf2 = st.columns(2)
+                edit_type_options = TRANSACTION_TYPES + [PLANNED_EXPENSE_TYPE]
                 with ecf1:
-                    edit_typ_idx = TRANSACTION_TYPES.index(tx["Transaktions_Typ"]) if tx["Transaktions_Typ"] in TRANSACTION_TYPES else 0
-                    edit_typ = st.selectbox("Transaktionstyp", TRANSACTION_TYPES, index=edit_typ_idx)
+                    edit_typ_idx = edit_type_options.index(tx["Transaktions_Typ"]) if tx["Transaktions_Typ"] in edit_type_options else 0
+                    edit_typ = st.selectbox("Transaktionstyp", edit_type_options, index=edit_typ_idx)
                 with ecf2:
                     name_opts = build_name_options(transactions_df)
                     edit_name_idx = name_opts.index(tx["Name"]) if tx["Name"] in name_opts else 0
                     edit_name = st.selectbox("Person", name_opts, index=edit_name_idx)
 
-                edit_betrag = st.number_input(
-                    "Betrag in EUR",
-                    min_value=0.0,
-                    step=0.5,
-                    format="%.2f",
-                    value=float(tx["Betrag"]) if pd.notna(tx["Betrag"]) else 0.0,
-                )
+                amount_col1, amount_col2 = st.columns(2)
+                with amount_col1:
+                    edit_kostenbezeichnung = st.text_input(
+                        "Bezeichnung",
+                        value=str(tx.get("Kostenbezeichnung", "") or ""),
+                    )
+                with amount_col2:
+                    edit_betrag = st.number_input(
+                        "Betrag in EUR",
+                        min_value=0.0,
+                        step=0.5,
+                        format="%.2f",
+                        value=float(tx["Betrag"]) if pd.notna(tx["Betrag"]) else 0.0,
+                    )
+
+                qty_col1, qty_col2, qty_col3 = st.columns([1, 1, 1.2])
+                with qty_col1:
+                    edit_anzahl = st.number_input(
+                        "Anzahl",
+                        min_value=0.0,
+                        step=1.0,
+                        format="%.2f",
+                        value=float(tx.get("Anzahl", 0.0) or 0.0),
+                    )
+                with qty_col2:
+                    edit_einheit = st.text_input("Einheit", value=str(tx.get("Einheit", "") or ""))
+                with qty_col3:
+                    edit_ist_investition = st.checkbox(
+                        "Als Investition markieren",
+                        value=bool(tx.get("Ist_Investition", False)),
+                    )
 
                 # Kategorie-spezifische Felder
                 edit_getraenk_name = ""
@@ -567,9 +804,9 @@ with edit_tab:
                     with gec1:
                         edit_getraenk_name = st.text_input("Getraenk (Name)", value=str(tx.get("Getraenk_Name", "") or ""))
                     with gec2:
-                        edit_getraenk_anzahl = st.number_input("Anzahl", min_value=0, step=1, value=int(tx.get("Getraenk_Anzahl", 0) or 0))
+                        edit_getraenk_anzahl = st.number_input("Anzahl", min_value=0, step=1, value=int(parse_quantity(tx.get("Getraenk_Anzahl", 0) or 0)))
                     with gec3:
-                        edit_getraenk_preis = st.number_input("Preis/Stueck", min_value=0.0, step=0.05, format="%.2f", value=float(tx.get("Getraenk_Preis_Stueck", 0.0) or 0.0))
+                        edit_getraenk_preis = st.number_input("Preis/Stueck", min_value=0.0, step=0.05, format="%.2f", value=parse_amount(tx.get("Getraenk_Preis_Stueck", 0.0) or 0.0))
                     za_idx = GETRAENKE_ZAHLUNGSART.index(tx.get("Getraenk_Zahlungsart", "")) if tx.get("Getraenk_Zahlungsart", "") in GETRAENKE_ZAHLUNGSART else 0
                     edit_getraenk_za = st.selectbox("Zahlungsart", GETRAENKE_ZAHLUNGSART, index=za_idx)
 
@@ -580,9 +817,22 @@ with edit_tab:
                     if edit_musik_typ in ("Kaution", "Kaution + Betrag"):
                         edit_kaution = st.number_input("Kautionsbetrag", min_value=0.0, step=10.0, format="%.2f", value=float(tx.get("Kaution_Betrag", 0.0) or 0.0))
 
-                bv_options = [HOUSE_PAYER, PRIVATE_PAYER]
-                bv_idx = bv_options.index(tx["Bezahlt_Von"]) if tx["Bezahlt_Von"] in bv_options else 0
-                edit_bezahlt_von = st.radio("Wer hat gezahlt?", bv_options, index=bv_idx, horizontal=True)
+                edit_planned_status = STATUS_PLANNED
+                if edit_typ == PLANNED_EXPENSE_TYPE:
+                    planned_status_options = [STATUS_PLANNED, STATUS_PAID_BY_HOUSE]
+                    current_planned_status = tx["Status"] if tx["Status"] in planned_status_options else STATUS_PLANNED
+                    edit_planned_status = st.radio(
+                        "Status der geplanten Ausgabe",
+                        planned_status_options,
+                        index=planned_status_options.index(current_planned_status),
+                        horizontal=True,
+                    )
+                    st.caption("Geplante Ausgaben bleiben geplant, bis du sie hier oder im Tab oben als vom Haus bezahlt markierst.")
+                    edit_bezahlt_von = ""
+                else:
+                    bv_options = [HOUSE_PAYER, PRIVATE_PAYER]
+                    bv_idx = bv_options.index(tx["Bezahlt_Von"]) if tx["Bezahlt_Von"] in bv_options else 0
+                    edit_bezahlt_von = st.radio("Wer hat gezahlt?", bv_options, index=bv_idx, horizontal=True)
                 edit_beschreibung = st.text_area("Beschreibung", value=str(tx["Beschreibung"] or ""))
 
                 save_col, del_col = st.columns([3, 1])
@@ -594,7 +844,15 @@ with edit_tab:
             if save_btn:
                 new_status = STATUS_DONE
                 new_paid_by = edit_bezahlt_von
-                if edit_typ == "Ausgabe/Einkauf" and edit_bezahlt_von == PRIVATE_PAYER:
+                new_paid_at = format_date_value(tx.get("Bezahlt_Am"))
+                if edit_typ == PLANNED_EXPENSE_TYPE:
+                    new_status = edit_planned_status
+                    new_paid_by = HOUSE_PAYER if edit_planned_status == STATUS_PAID_BY_HOUSE else ""
+                    if edit_planned_status == STATUS_PAID_BY_HOUSE:
+                        new_paid_at = new_paid_at or date.today().strftime("%d.%m.%Y")
+                    else:
+                        new_paid_at = ""
+                elif edit_typ == "Ausgabe/Einkauf" and edit_bezahlt_von == PRIVATE_PAYER:
                     new_status = STATUS_OPEN
                 elif edit_typ == "Einzahlung auf das Haus":
                     new_paid_by = edit_name
@@ -606,8 +864,13 @@ with edit_tab:
                     "Transaktions_Typ": edit_typ,
                     "Betrag": float(edit_betrag),
                     "Kategorie": edit_kategorie,
+                    "Bezahlt_Am": new_paid_at,
                     "Bezahlt_Von": new_paid_by,
                     "Beschreibung": edit_beschreibung,
+                    "Kostenbezeichnung": edit_kostenbezeichnung,
+                    "Anzahl": edit_anzahl,
+                    "Einheit": edit_einheit,
+                    "Ist_Investition": "Ja" if edit_ist_investition else "",
                     "Status": new_status,
                     "Getraenk_Name": edit_getraenk_name if edit_kategorie == "Getraenke" else "",
                     "Getraenk_Anzahl": edit_getraenk_anzahl if edit_kategorie == "Getraenke" else "",
@@ -634,92 +897,153 @@ with overview_tab:
     st.subheader("Transparente Uebersicht")
 
     # --- Berechnungen ---
-    house_income = transactions_df.loc[
-        transactions_df["Transaktions_Typ"] == "Einzahlung auf das Haus", "Betrag"
+    initial_house_funding = transactions_df.loc[initial_house_funding_mask(transactions_df), "Betrag"].sum()
+    people_deposits = transactions_df.loc[
+        (transactions_df["Transaktions_Typ"] == "Einzahlung auf das Haus")
+        & (~initial_house_funding_mask(transactions_df)),
+        "Betrag",
     ].sum()
-    house_direct_spend = transactions_df.loc[
-        (
-            (transactions_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
-            & (transactions_df["Bezahlt_Von"] == HOUSE_PAYER)
-        )
-        | (
-            (transactions_df["Transaktions_Typ"] == "Geplante Ausgabe")
-            & (transactions_df["Status"] == STATUS_PAID_BY_HOUSE)
-        ),
+    party_income = transactions_df.loc[
+        transactions_df["Transaktions_Typ"] == "Einnahmen (Party)", "Betrag"
+    ].sum()
+    house_income = initial_house_funding + people_deposits + party_income
+    party_direct_spend = transactions_df.loc[
+        party_expense_mask(transactions_df) & (transactions_df["Bezahlt_Von"] == HOUSE_PAYER),
+        "Betrag",
+    ].sum()
+    investment_direct_spend = transactions_df.loc[
+        investment_expense_mask(transactions_df) & (transactions_df["Bezahlt_Von"] == HOUSE_PAYER),
         "Betrag",
     ].sum()
     reimbursements_paid = transactions_df.loc[
         transactions_df["Transaktions_Typ"] == "Rueckerstattung vom Haus", "Betrag"
     ].sum()
-    house_total_paid = house_direct_spend + reimbursements_paid
+    house_total_paid = party_direct_spend + investment_direct_spend + reimbursements_paid
     planned_total = transactions_df.loc[
-        (transactions_df["Transaktions_Typ"] == "Geplante Ausgabe")
-        & (transactions_df["Status"] == STATUS_PLANNED),
+        planned_party_mask(transactions_df),
         "Betrag",
     ].sum()
+    planned_investment_total = transactions_df.loc[
+        (transactions_df["Transaktions_Typ"] == PLANNED_EXPENSE_TYPE)
+        & (transactions_df["Status"] == STATUS_PLANNED)
+        & (transactions_df["Ist_Investition"].fillna(False)),
+        "Betrag",
+    ].sum()
+    party_total = transactions_df.loc[party_expense_mask(transactions_df), "Betrag"].sum()
+    investment_total = transactions_df.loc[investment_expense_mask(transactions_df), "Betrag"].sum()
 
     person_summary = build_person_summary(transactions_df)
     open_to_people = person_summary["Gesamtanspruch_gegen_Haus"].sum() if not person_summary.empty else 0.0
+    private_party_total = person_summary["Privat_vorgelegt_Party"].sum() if not person_summary.empty else 0.0
+    private_investment_total = person_summary["Privat_vorgelegt_Investition"].sum() if not person_summary.empty else 0.0
     liquide_mittel = house_income - house_total_paid
     house_balance_after_obligations = liquide_mittel - open_to_people - planned_total
 
-    # --- Metriken: Zeile 1 (Liquidität) ---
-    st.markdown("#### Hauskasse auf einen Blick")
-    row1 = st.columns(3)
-    row1[0].metric("Eingezahlt (gesamt)", format_euro(house_income))
-    row1[1].metric("Ausgegeben (gesamt)", format_euro(house_total_paid))
-    liq_delta = f"{'+' if liquide_mittel >= 0 else ''}{liquide_mittel:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
-    row1[2].metric(
-        "Liquide Mittel (Kasse)",
-        format_euro(liquide_mittel),
-        delta=liq_delta,
-        delta_color="normal" if liquide_mittel >= 0 else "inverse",
+    # --- Übersicht-Header ---
+    ohne_anfang = st.toggle(
+        "Anfangsbestand herausrechnen (Gewinn/Verlust-Sicht)",
+        value=False,
+        help="Blendet den Anfangsbestand (Altes Polizeipräsidium) aus der Berechnung aus, "
+             "um nur den durch die Party erzielten Gewinn/Verlust zu sehen.",
     )
+    if ohne_anfang:
+        income_basis = people_deposits + party_income
+        liquide_mittel_angepasst = income_basis - house_total_paid
+        balance_angepasst = liquide_mittel_angepasst - open_to_people - planned_total
+    else:
+        income_basis = house_income
+        liquide_mittel_angepasst = liquide_mittel
+        balance_angepasst = house_balance_after_obligations
 
-    # --- Metriken: Zeile 2 (Verpflichtungen & Endstand) ---
-    row2 = st.columns(3)
-    row2[0].metric("Offene Auslagen (Personen)", format_euro(open_to_people))
-    row2[1].metric("Geplante Kosten noch offen", format_euro(planned_total))
-    balance_color = "normal" if house_balance_after_obligations >= 0 else "inverse"
-    bal_delta = f"{'+' if house_balance_after_obligations >= 0 else ''}{house_balance_after_obligations:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
-    row2[2].metric(
-        "Hausbestand nach allem",
-        format_euro(house_balance_after_obligations),
-        delta=bal_delta,
-        delta_color=balance_color,
-    )
+    bal_color_hex = "#15803d" if balance_angepasst >= 0 else "#b91c1c"
+    bal_sign = "+" if balance_angepasst >= 0 else ""
+
+    def detail_line(label, value):
+        return (
+            f"<div style='display:flex;justify-content:space-between;padding:3px 0;"
+            f"border-bottom:1px solid #2a2a2a;font-size:0.82rem'>"
+            f"<span style='color:#888'>{label}</span>"
+            f"<span>{format_euro(value)}</span></div>"
+        )
+
+    col_ein, col_aus, col_bil = st.columns(3)
+
+    with col_ein:
+        with st.container(border=True):
+            st.markdown(
+                "<div style='font-size:0.75rem;color:#888;text-transform:uppercase;"
+                "letter-spacing:0.08em;margin-bottom:4px'>Einnahmen</div>"
+                f"<div style='font-size:2rem;font-weight:700;margin-bottom:8px'>"
+                f"{format_euro(income_basis)}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                detail_line("Startbestand" if not ohne_anfang else "Startbestand (ausgeblendet)",
+                            initial_house_funding if not ohne_anfang else 0)
+                + detail_line("Einzahlungen Personen", people_deposits)
+                + detail_line("Einnahmen Party", party_income),
+                unsafe_allow_html=True,
+            )
+
+    with col_aus:
+        with st.container(border=True):
+            st.markdown(
+                "<div style='font-size:0.75rem;color:#888;text-transform:uppercase;"
+                "letter-spacing:0.08em;margin-bottom:4px'>Ausgaben & Verpflichtungen</div>"
+                f"<div style='font-size:2rem;font-weight:700;margin-bottom:8px'>"
+                f"{format_euro(house_total_paid + open_to_people + planned_total)}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                detail_line("Partykosten bezahlt", party_direct_spend)
+                + detail_line("Investitionen bezahlt", investment_direct_spend)
+                + detail_line("Erstattungen gezahlt", reimbursements_paid)
+                + detail_line("Offene Ansprüche", open_to_people)
+                + detail_line("Geplante Kosten (offen)", planned_total),
+                unsafe_allow_html=True,
+            )
+
+    with col_bil:
+        with st.container(border=True):
+            st.markdown(
+                "<div style='font-size:0.75rem;color:#888;text-transform:uppercase;"
+                "letter-spacing:0.08em;margin-bottom:4px'>"
+                + ("Gewinn / Verlust" if ohne_anfang else "Kassenbestand")
+                + "</div>"
+                f"<div style='font-size:2rem;font-weight:700;color:{bal_color_hex};margin-bottom:8px'>"
+                f"{bal_sign}{format_euro(balance_angepasst)}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                detail_line("Liquide Mittel", liquide_mittel_angepasst)
+                + detail_line("Privat vorgelegt (Party)", private_party_total)
+                + detail_line("Privat vorgelegt (Invest.)", private_investment_total)
+                + detail_line("Geplante Investitionen", planned_investment_total),
+                unsafe_allow_html=True,
+            )
 
     # --- Wasserfalldiagramm ---
     st.markdown("### Geldfluss")
+    if ohne_anfang:
+        wf_labels   = ["Einzahlungen Personen", "Einnahmen Party", "Ausgaben", "Liquide Mittel", "Auslagen offen", "Geplante Kosten", "Endbestand"]
+        wf_measures = ["absolute", "relative", "relative", "total", "relative", "relative", "total"]
+        wf_y        = [people_deposits, party_income, -house_total_paid, liquide_mittel_angepasst, -open_to_people, -planned_total, balance_angepasst]
+        wf_text     = [format_euro(people_deposits), format_euro(party_income), format_euro(-house_total_paid), format_euro(liquide_mittel_angepasst), format_euro(-open_to_people), format_euro(-planned_total), format_euro(balance_angepasst)]
+    else:
+        wf_labels   = ["Anfangsbestand", "Einzahlungen Personen", "Einnahmen Party", "Ausgaben", "Liquide Mittel", "Auslagen offen", "Geplante Kosten", "Endbestand"]
+        wf_measures = ["absolute", "relative", "relative", "relative", "total", "relative", "relative", "total"]
+        wf_y        = [initial_house_funding, people_deposits, party_income, -house_total_paid, liquide_mittel_angepasst, -open_to_people, -planned_total, balance_angepasst]
+        wf_text     = [format_euro(initial_house_funding), format_euro(people_deposits), format_euro(party_income), format_euro(-house_total_paid), format_euro(liquide_mittel_angepasst), format_euro(-open_to_people), format_euro(-planned_total), format_euro(balance_angepasst)]
+
     waterfall_fig = go.Figure(
         go.Waterfall(
             name="Hauskonto",
             orientation="v",
-            measure=["absolute", "relative", "total", "relative", "relative", "total"],
-            x=[
-                "Einzahlungen",
-                "Ausgaben",
-                "Liquide Mittel",
-                "Auslagen offen",
-                "Geplante Kosten",
-                "Endbestand",
-            ],
-            y=[
-                house_income,
-                -house_total_paid,
-                liquide_mittel,
-                -open_to_people,
-                -planned_total,
-                house_balance_after_obligations,
-            ],
-            text=[
-                format_euro(house_income),
-                format_euro(-house_total_paid),
-                format_euro(liquide_mittel),
-                format_euro(-open_to_people),
-                format_euro(-planned_total),
-                format_euro(house_balance_after_obligations),
-            ],
+            measure=wf_measures,
+            x=wf_labels,
+            customdata=wf_labels,
+            y=wf_y,
+            text=wf_text,
             textposition="outside",
             increasing={"marker": {"color": "#15803d"}},
             decreasing={"marker": {"color": "#b91c1c"}},
@@ -732,17 +1056,178 @@ with overview_tab:
         margin={"l": 20, "r": 20, "t": 20, "b": 20},
         yaxis_title="EUR",
         showlegend=False,
+        clickmode="event",
     )
-    st.plotly_chart(waterfall_fig, use_container_width=True)
+    wf_event = st.plotly_chart(waterfall_fig, use_container_width=True, on_select="rerun", key="waterfall_chart")
+
+    # Tabelle bei Balken-Klick
+    selected_points = (wf_event or {}).get("selection", {}).get("points", [])
+    if selected_points:
+        clicked_label = selected_points[0].get("x") or selected_points[0].get("label", "")
+        detail_df = None
+        detail_title = ""
+
+        if clicked_label == "Anfangsbestand":
+            detail_df = transactions_df[initial_house_funding_mask(transactions_df)].copy()
+            detail_title = "Anfangsbestand"
+        elif clicked_label == "Einzahlungen Personen":
+            detail_df = transactions_df[
+                (transactions_df["Transaktions_Typ"] == "Einzahlung auf das Haus")
+                & (~initial_house_funding_mask(transactions_df))
+            ].copy()
+            detail_title = "Einzahlungen Personen"
+        elif clicked_label == "Einnahmen Party":
+            detail_df = transactions_df[
+                transactions_df["Transaktions_Typ"] == "Einnahmen (Party)"
+            ].copy()
+            detail_title = "Einnahmen Party"
+        elif clicked_label == "Ausgaben":
+            detail_df = transactions_df[
+                party_expense_mask(transactions_df) | investment_expense_mask(transactions_df)
+                | (transactions_df["Transaktions_Typ"] == "Rueckerstattung vom Haus")
+            ].copy()
+            detail_title = "Ausgaben & Erstattungen"
+        elif clicked_label == "Auslagen offen":
+            # Guthaben: Einzahlungen die noch im Haus liegen (pro Person)
+            guthaben_df = person_summary[person_summary["Guthaben_im_Haus"] > 0][["Name", "Guthaben_im_Haus"]].copy()
+            guthaben_df = guthaben_df.rename(columns={"Guthaben_im_Haus": "Betrag"})
+            guthaben_df["Typ"] = "Guthaben im Haus (Einzahlung)"
+            # Offene private Auslagen
+            auslagen_df = transactions_df[
+                (transactions_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
+                & (transactions_df["Bezahlt_Von"] == PRIVATE_PAYER)
+                & (transactions_df["Status"] == STATUS_OPEN)
+            ][["Name", "Kategorie", "Beschreibung", "Betrag"]].copy()
+            auslagen_df["Typ"] = "Offene Auslage (privat vorgestreckt)"
+            combined = pd.concat([
+                guthaben_df[["Name", "Typ", "Betrag"]],
+                auslagen_df[["Name", "Typ", "Kategorie", "Beschreibung", "Betrag"]],
+            ], ignore_index=True)
+            combined["Betrag"] = combined["Betrag"].map(format_euro)
+            st.markdown("#### Ansprüche gegen das Haus")
+            st.dataframe(combined, use_container_width=True, hide_index=True)
+            detail_title = None  # schon gerendert
+        elif clicked_label == "Geplante Kosten":
+            detail_df = transactions_df[
+                planned_party_mask(transactions_df)
+            ].copy()
+            detail_title = "Geplante Kosten (noch nicht bezahlt)"
+        elif clicked_label in ("Liquide Mittel", "Endbestand"):
+            st.info(f"**{clicked_label}** ist ein berechneter Wert – keine einzelnen Transaktionen dahinter.")
+
+        if detail_df is not None:
+            st.markdown(f"#### {detail_title}")
+            if detail_df.empty:
+                st.info("Keine Transaktionen vorhanden.")
+            else:
+                show_cols = ["Erfasst_Am", "Name", "Transaktions_Typ", "Kategorie", "Beschreibung", "Betrag", "Status"]
+                show_cols = [c for c in show_cols if c in detail_df.columns]
+                detail_df = detail_df.copy()
+                detail_df["Erfasst_Am"] = detail_df["Erfasst_Am"].dt.strftime("%d.%m.%Y").fillna("-")
+                detail_df["Betrag"] = detail_df["Betrag"].map(format_euro)
+                st.dataframe(detail_df[show_cols], use_container_width=True, hide_index=True)
+
+    # --- Einnahmen vs. Ausgaben Pie + Ansprüche pro Person ---
+    if not person_summary.empty or party_income > 0 or people_deposits > 0:
+        pie_col, bar_col = st.columns(2)
+
+        with pie_col:
+            st.markdown("### Einnahmen vs. Ausgaben")
+            pie_labels = ["Einzahlungen Personen", "Einnahmen Party", "Partykosten", "Investitionen", "Erstattungen"]
+            pie_values = [people_deposits, party_income, party_direct_spend, investment_direct_spend, reimbursements_paid]
+            pie_colors = ["#15803d", "#22c55e", "#b91c1c", "#f97316", "#6366f1"]
+            # nur Einträge > 0 zeigen
+            filtered = [(l, v, c) for l, v, c in zip(pie_labels, pie_values, pie_colors) if v > 0]
+            if filtered:
+                fl, fv, fc = zip(*filtered)
+                pie_fig = go.Figure(go.Pie(
+                    labels=fl,
+                    values=fv,
+                    marker={"colors": fc},
+                    textinfo="label+percent",
+                    hovertemplate="%{label}<br>%{value:,.2f} EUR<extra></extra>",
+                    hole=0.35,
+                ))
+                pie_fig.update_layout(
+                    height=320,
+                    margin={"l": 10, "r": 10, "t": 10, "b": 10},
+                    showlegend=False,
+                )
+                st.plotly_chart(pie_fig, use_container_width=True)
+
+        with bar_col:
+            st.markdown("### Ansprüche pro Person")
+            anspruch_df = person_summary[person_summary["Gesamtanspruch_gegen_Haus"] > 0].copy()
+            if anspruch_df.empty:
+                st.info("Alle Ansprüche beglichen.")
+            else:
+                anspruch_fig = go.Figure(go.Bar(
+                    x=anspruch_df["Gesamtanspruch_gegen_Haus"],
+                    y=anspruch_df["Name"],
+                    orientation="h",
+                    text=[format_euro(v) for v in anspruch_df["Gesamtanspruch_gegen_Haus"]],
+                    textposition="outside",
+                    customdata=list(zip(
+                        anspruch_df["Einzahlungen"],
+                        anspruch_df["Offene_Auslagen"],
+                    )),
+                    hovertemplate=(
+                        "<b>%{y}</b><br>"
+                        "Anspruch gesamt: %{x:,.2f} EUR<br>"
+                        "davon Einzahlung: %{customdata[0]:,.2f} EUR<br>"
+                        "davon offene Auslagen: %{customdata[1]:,.2f} EUR"
+                        "<extra></extra>"
+                    ),
+                    marker_color="#7c3aed",
+                ))
+                anspruch_fig.update_layout(
+                    height=max(420, 80 + len(anspruch_df) * 52),
+                    margin={"l": 10, "r": 80, "t": 10, "b": 10},
+                    xaxis_title="EUR",
+                    yaxis_title="",
+                    showlegend=False,
+                    yaxis={"categoryorder": "total ascending"},
+                )
+                st.plotly_chart(anspruch_fig, use_container_width=True)
+
+    # --- Ausgaben-Timeline ---
+    all_expense_df = transactions_df[
+        party_expense_mask(transactions_df) | investment_expense_mask(transactions_df)
+    ].copy()
+    if not all_expense_df.empty and all_expense_df["Erfasst_Am"].notna().any():
+        st.markdown("### Ausgaben über Zeit")
+        timeline_df = all_expense_df.dropna(subset=["Erfasst_Am"]).copy()
+        timeline_df["Datum"] = timeline_df["Erfasst_Am"].dt.date
+        timeline_agg = (
+            timeline_df.groupby(["Datum", "Kategorie"])["Betrag"]
+            .sum()
+            .reset_index()
+            .sort_values("Datum")
+        )
+        timeline_fig = go.Figure()
+        for kat in timeline_agg["Kategorie"].unique():
+            df_k = timeline_agg[timeline_agg["Kategorie"] == kat]
+            timeline_fig.add_trace(go.Bar(
+                x=df_k["Datum"].astype(str),
+                y=df_k["Betrag"],
+                name=kat,
+                marker_color=KATEGORIE_COLORS.get(kat, "#94a3b8"),
+                hovertemplate=f"<b>{kat}</b><br>%{{x}}<br>%{{y:,.2f}} EUR<extra></extra>",
+            ))
+        timeline_fig.update_layout(
+            barmode="stack",
+            height=320,
+            margin={"l": 20, "r": 20, "t": 10, "b": 20},
+            yaxis_title="EUR",
+            xaxis_title="",
+            legend={"orientation": "h", "y": -0.2},
+        )
+        st.plotly_chart(timeline_fig, use_container_width=True)
 
     # --- Ausgaben nach Kategorie ---
     st.markdown("### Ausgaben nach Kategorie")
     ausgaben_df = transactions_df[
-        (transactions_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
-        | (
-            (transactions_df["Transaktions_Typ"] == "Geplante Ausgabe")
-            & (transactions_df["Status"] == STATUS_PAID_BY_HOUSE)
-        )
+        party_expense_mask(transactions_df)
     ].copy()
     if ausgaben_df.empty:
         st.info("Noch keine Ausgaben vorhanden.")
@@ -754,6 +1239,7 @@ with overview_tab:
             text=[format_euro(v) for v in cat_sum["Betrag"]],
             textposition="outside",
             marker_color="#1d4ed8",
+            hovertemplate="<b>%{x}</b><br>%{y:,.2f} EUR<extra></extra>",
         ))
         cat_fig.update_layout(
             height=340,
@@ -762,7 +1248,73 @@ with overview_tab:
             showlegend=False,
             xaxis_title="",
         )
-        st.plotly_chart(cat_fig, use_container_width=True)
+        cat_event = st.plotly_chart(cat_fig, use_container_width=True, on_select="rerun", key="cat_chart")
+        cat_points = (cat_event or {}).get("selection", {}).get("points", [])
+        if cat_points:
+            clicked_kat = cat_points[0].get("x", "")
+            if clicked_kat:
+                kat_detail = ausgaben_df[ausgaben_df["Kategorie"].astype(str) == clicked_kat].copy()
+                st.markdown(f"#### Einzelposten: {clicked_kat}")
+                kat_detail["Erfasst_Am"] = kat_detail["Erfasst_Am"].dt.strftime("%d.%m.%Y").fillna("-")
+                kat_detail["Betrag"] = kat_detail["Betrag"].map(format_euro)
+                show = ["Erfasst_Am", "Name", "Kategorie", "Kostenbezeichnung", "Beschreibung", "Betrag", "Bezahlt_Von", "Status"]
+                show = [c for c in show if c in kat_detail.columns]
+                st.dataframe(kat_detail[show], use_container_width=True, hide_index=True)
+
+        st.markdown("### Kosten nach Bezeichnung")
+        detail_df = ausgaben_df.copy()
+        detail_df["Bezeichnung"] = detail_df.apply(build_cost_label, axis=1)
+        detail_df["Effektive_Anzahl"] = detail_df["Anzahl"]
+        getraenke_mask = (detail_df["Effektive_Anzahl"] <= 0) & (detail_df["Getraenk_Anzahl"] > 0)
+        detail_df.loc[getraenke_mask, "Effektive_Anzahl"] = detail_df.loc[getraenke_mask, "Getraenk_Anzahl"]
+
+        available_kats = sorted(detail_df["Kategorie"].dropna().astype(str).unique())
+        all_label = "Alle"
+        filter_options = [all_label] + available_kats
+        selected_kats = st.multiselect(
+            "Kategorien filtern",
+            options=available_kats,
+            default=available_kats,
+            key="pie_kat_filter",
+            format_func=lambda k: k,
+        )
+        if not selected_kats:
+            selected_kats = available_kats
+        filtered_detail_df = detail_df[detail_df["Kategorie"].astype(str).isin(selected_kats)]
+
+        detail_summary = (
+            filtered_detail_df.groupby(["Bezeichnung", "Kategorie"], dropna=False)
+            .agg(
+                Anzahl=("Effektive_Anzahl", "sum"),
+                Betrag=("Betrag", "sum"),
+            )
+            .reset_index()
+            .sort_values("Betrag", ascending=False)
+        )
+
+        pie_colors = [KATEGORIE_COLORS.get(k, "#94a3b8") for k in detail_summary["Kategorie"]]
+        detail_pie = go.Figure(go.Pie(
+            labels=detail_summary["Bezeichnung"],
+            values=detail_summary["Betrag"],
+            marker={"colors": pie_colors},
+            customdata=list(zip(detail_summary["Kategorie"], detail_summary["Anzahl"])),
+            hovertemplate=(
+                "<b>%{label}</b><br>"
+                "Kategorie: %{customdata[0]}<br>"
+                "%{value:,.2f} EUR (%{percent})"
+                "<extra></extra>"
+            ),
+            textinfo="label+percent",
+            textposition="outside",
+            hole=0.3,
+        ))
+        detail_pie.update_layout(
+            height=max(480, 300 + len(detail_summary) * 12),
+            margin={"l": 20, "r": 20, "t": 10, "b": 20},
+            showlegend=True,
+            legend={"orientation": "v", "x": 1.02, "y": 0.5},
+        )
+        st.plotly_chart(detail_pie, use_container_width=True)
 
     # --- Personensalden ---
     st.markdown("### Personensalden")
@@ -772,14 +1324,26 @@ with overview_tab:
         # Tabelle mit lesbaren Spaltennamen
         display_person_summary = person_summary.rename(columns={
             "Einzahlungen": "Eingezahlt",
-            "Privat_vorgelegt": "Privat vorgelegt",
+            "Privat_vorgelegt_Party": "Privat vorgelegt Party",
+            "Privat_vorgelegt_Investition": "Privat vorgelegt Investition",
+            "Privat_vorgelegt_Gesamt": "Privat vorgelegt gesamt",
             "Rueckerstattungen": "Erstattet",
             "Guthaben_im_Haus": "Guthaben im Haus",
             "Offene_Auslagen": "Auslage offen",
             "Gesamtanspruch_gegen_Haus": "Anspruch gesamt",
             "Geplante_Ausgaben": "Geplant",
         }).copy()
-        for col in ["Eingezahlt", "Privat vorgelegt", "Erstattet", "Guthaben im Haus", "Auslage offen", "Anspruch gesamt", "Geplant"]:
+        for col in [
+            "Eingezahlt",
+            "Privat vorgelegt Party",
+            "Privat vorgelegt Investition",
+            "Privat vorgelegt gesamt",
+            "Erstattet",
+            "Guthaben im Haus",
+            "Auslage offen",
+            "Anspruch gesamt",
+            "Geplant",
+        ]:
             display_person_summary[col] = display_person_summary[col].map(format_euro)
         st.dataframe(display_person_summary, use_container_width=True, hide_index=True)
 
@@ -794,7 +1358,9 @@ with overview_tab:
                 row_data = person_summary[person_summary["Name"] == person_name].iloc[0]
                 person_tx = transactions_df[transactions_df["Name"].astype(str) == person_name]
                 eingezahlt = row_data["Einzahlungen"]
-                vorgelegt = row_data["Privat_vorgelegt"]
+                vorgelegt = row_data["Privat_vorgelegt_Gesamt"]
+                vorgelegt_party = row_data["Privat_vorgelegt_Party"]
+                vorgelegt_invest = row_data["Privat_vorgelegt_Investition"]
                 erstattet = row_data["Rueckerstattungen"]
                 offen = row_data["Offene_Auslagen"]
                 anspruch = row_data["Gesamtanspruch_gegen_Haus"]
@@ -802,12 +1368,12 @@ with overview_tab:
                 if eingezahlt == 0 and vorgelegt == 0:
                     status_color = "#7a6000"
                     status_text = "Noch nichts eingetragen"
-                elif offen > 0:
+                elif anspruch > 0:
                     status_color = "#7a6000"
-                    status_text = f"Offen: {format_euro(offen)}"
+                    status_text = f"Offen: {format_euro(anspruch)}"
                 else:
                     status_color = "#1a6b2f"
-                    status_text = "Erstattet"
+                    status_text = "Alles beglichen"
 
                 with card_cols[col_idx]:
                     with st.container(border=True):
@@ -820,8 +1386,10 @@ with overview_tab:
                         st.markdown(
                             f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Eingezahlt</div>"
                             f"<div style='font-size:0.85rem;margin-bottom:4px'>{format_euro(eingezahlt)}</div>"
-                            f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Privat vorgelegt</div>"
+                            f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Privat vorgelegt gesamt</div>"
                             f"<div style='font-size:0.85rem;margin-bottom:4px'>{format_euro(vorgelegt)}</div>"
+                            f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>davon Party / Invest.</div>"
+                            f"<div style='font-size:0.85rem;margin-bottom:4px'>{format_euro(vorgelegt_party)} / {format_euro(vorgelegt_invest)}</div>"
                             f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Erstattet</div>"
                             f"<div style='font-size:0.85rem;margin-bottom:4px'>{format_euro(erstattet)}</div>"
                             f"<div style='font-size:0.7rem;color:#aaa;margin-bottom:1px'>Anspruch gesamt</div>"
@@ -837,6 +1405,44 @@ with overview_tab:
                                     f"{datum} · {tx['Kategorie']} · {format_euro(tx['Betrag'])}"
                                 )
 
+    # --- Rückzahlungs-Checkliste ---
+    with st.expander("Rückzahlungen abhaken", expanded=False):
+        st.caption("Hier kannst du festhalten, wem das Darlehen (Einzahlung) und offene Auslagen bereits zurückgezahlt wurden.")
+        if person_summary.empty:
+            st.info("Keine Personen vorhanden.")
+        else:
+            rueckzahl_cols = st.columns(3)
+            for i, (_, row_data) in enumerate(person_summary.iterrows()):
+                pname = row_data["Name"]
+                panspruch = row_data["Gesamtanspruch_gegen_Haus"]
+                if panspruch <= 0:
+                    continue
+                col = rueckzahl_cols[i % 3]
+                key = f"rueckzahlung_{pname}"
+                already = st.session_state.get(key, False)
+                checked = col.checkbox(
+                    f"{pname} – {format_euro(panspruch)}",
+                    value=already,
+                    key=key,
+                )
+            bezahlt = [
+                row_data["Name"]
+                for _, row_data in person_summary.iterrows()
+                if row_data["Gesamtanspruch_gegen_Haus"] > 0
+                and st.session_state.get(f"rueckzahlung_{row_data['Name']}", False)
+            ]
+            offen_personen = [
+                row_data["Name"]
+                for _, row_data in person_summary.iterrows()
+                if row_data["Gesamtanspruch_gegen_Haus"] > 0
+                and not st.session_state.get(f"rueckzahlung_{row_data['Name']}", False)
+            ]
+            st.markdown("---")
+            if bezahlt:
+                st.success(f"Bereits zurückgezahlt: {', '.join(bezahlt)}")
+            if offen_personen:
+                st.warning(f"Noch offen: {', '.join(offen_personen)}")
+
     # --- Privat vorgelegte Ausgaben (eingeklappt) ---
     with st.expander("Privat vorgelegte Ausgaben", expanded=False):
         st.caption("Ausgaben die eine Person privat vorgestreckt hat und vom Haus erstattet werden muessen.")
@@ -849,8 +1455,10 @@ with overview_tab:
         else:
             open_private_df["Erfasst_Am"] = open_private_df["Erfasst_Am"].dt.strftime("%d.%m.%Y").fillna("-")
             open_private_df["Betrag"] = open_private_df["Betrag"].map(format_euro)
+            open_private_df["Anzahl"] = open_private_df["Anzahl"].map(format_quantity)
+            open_private_df["Ist_Investition"] = open_private_df["Ist_Investition"].map(lambda value: "Ja" if value else "")
             st.dataframe(
-                open_private_df[["Erfasst_Am", "Name", "Kategorie", "Beschreibung", "Betrag", "Status"]],
+                open_private_df[["Erfasst_Am", "Name", "Kategorie", "Kostenbezeichnung", "Anzahl", "Einheit", "Beschreibung", "Betrag", "Status", "Ist_Investition"]],
                 use_container_width=True,
                 hide_index=True,
             )
@@ -872,10 +1480,12 @@ with overview_tab:
             st.info("Bisher wurden noch keine Hausausgaben verbucht.")
         else:
             house_spend_df["Betrag"] = house_spend_df["Betrag"].map(format_euro)
+            house_spend_df["Anzahl"] = house_spend_df["Anzahl"].map(format_quantity)
             house_spend_df["Erfasst_Am"] = house_spend_df["Erfasst_Am"].dt.strftime("%d.%m.%Y").fillna("-")
             house_spend_df["Bezahlt_Am"] = house_spend_df["Bezahlt_Am"].dt.strftime("%d.%m.%Y").fillna("-")
+            house_spend_df["Ist_Investition"] = house_spend_df["Ist_Investition"].map(lambda value: "Ja" if value else "")
             st.dataframe(
-                house_spend_df[["Erfasst_Am", "Bezahlt_Am", "Name", "Transaktions_Typ", "Kategorie", "Beschreibung", "Betrag", "Status"]],
+                house_spend_df[["Erfasst_Am", "Bezahlt_Am", "Name", "Transaktions_Typ", "Kategorie", "Kostenbezeichnung", "Anzahl", "Einheit", "Beschreibung", "Betrag", "Status", "Ist_Investition"]],
                 use_container_width=True,
                 hide_index=True,
             )
@@ -906,6 +1516,8 @@ with overview_tab:
             for date_col in ["Erfasst_Am", "Faellig_Am", "Bezahlt_Am"]:
                 ledger_df[date_col] = ledger_df[date_col].dt.strftime("%d.%m.%Y").fillna("-")
             ledger_df["Betrag"] = ledger_df["Betrag"].map(format_euro)
+            ledger_df["Anzahl"] = ledger_df["Anzahl"].map(format_quantity)
+            ledger_df["Ist_Investition"] = ledger_df["Ist_Investition"].map(lambda value: "Ja" if value else "")
             st.dataframe(
                 ledger_df[
                     [
@@ -916,8 +1528,12 @@ with overview_tab:
                         "Transaktions_Typ",
                         "Kategorie",
                         "Bezahlt_Von",
+                        "Kostenbezeichnung",
+                        "Anzahl",
+                        "Einheit",
                         "Beschreibung",
                         "Betrag",
+                        "Ist_Investition",
                         "Status",
                     ]
                 ],

@@ -34,6 +34,7 @@ CATEGORY_OPTIONS = [
 GETRAENKE_ZAHLUNGSART = ["Vorkasse", "Auf Kommission"]
 MUSIK_ZAHLUNGSTYP = ["Normaler Betrag", "Kaution", "Kaution + Betrag"]
 STANDARD_NAMES = [
+    HOUSE_PAYER,
     "Freddy",
     "Divin",
     "Chrissi",
@@ -46,6 +47,12 @@ STANDARD_NAMES = [
     "Michelle",
     "Finn",
 ]
+HOUSE_NAME_ALIASES = {
+    HOUSE_PAYER,
+    "Altes Polizeipraesidium (Kassenstand Anfang)",
+    "Altes Polizeipräsidum (Kassenstand Anfang)",
+    "Altes Polizeipräsidium (Kassenstand Anfang)",
+}
 HEADER_ROW = [
     "ID",
     "Erfasst_Am",
@@ -57,6 +64,10 @@ HEADER_ROW = [
     "Kategorie",
     "Bezahlt_Von",
     "Beschreibung",
+    "Kostenbezeichnung",
+    "Anzahl",
+    "Einheit",
+    "Ist_Investition",
     "Status",
     "Referenz_ID",
     "Getraenk_Name",
@@ -93,6 +104,38 @@ def parse_amount(value):
         return float(text)
     except ValueError:
         return 0.0
+
+
+def parse_quantity(value):
+    text = str(value).strip()
+    if not text:
+        return 0.0
+    text = text.replace(",", ".")
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def parse_bool(value) -> bool:
+    return str(value).strip().lower() in {"1", "true", "ja", "yes", "y"}
+
+
+def format_quantity(value) -> str:
+    if value is None or pd.isna(value) or float(value) == 0:
+        return "-"
+    value = float(value)
+    if value.is_integer():
+        return str(int(value))
+    return f"{value:.2f}".replace(".", ",")
+
+
+def build_cost_label(row: pd.Series) -> str:
+    for column in ["Kostenbezeichnung", "Getraenk_Name", "Beschreibung"]:
+        value = str(row.get(column, "")).strip()
+        if value:
+            return value
+    return "Ohne Bezeichnung"
 
 
 def get_gspread_client():
@@ -165,8 +208,21 @@ def load_transactions():
 
     df = pd.DataFrame(data_rows)
     df["Betrag"] = df["Betrag"].apply(parse_amount)
+    for col in ["Anzahl", "Getraenk_Anzahl"]:
+        if col in df.columns:
+            df[col] = df[col].apply(parse_quantity)
+    if "Ist_Investition" in df.columns:
+        df["Ist_Investition"] = df["Ist_Investition"].apply(parse_bool)
+    else:
+        df["Ist_Investition"] = False
     for col in ["Erfasst_Am", "Faellig_Am", "Bezahlt_Am"]:
         df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+    if "Kostenbezeichnung" not in df.columns:
+        df["Kostenbezeichnung"] = ""
+    if "Anzahl" not in df.columns:
+        df["Anzahl"] = 0.0
+    if "Einheit" not in df.columns:
+        df["Einheit"] = ""
     return df
 
 
@@ -203,6 +259,7 @@ def build_name_options(df: pd.DataFrame):
 
 def build_person_summary(df: pd.DataFrame) -> pd.DataFrame:
     people_df = df[df["Name"].astype(str).str.strip() != ""].copy()
+    people_df = people_df[~people_df["Name"].astype(str).isin(HOUSE_NAME_ALIASES)]
     if people_df.empty:
         return pd.DataFrame(
             columns=[
@@ -258,6 +315,25 @@ def build_person_summary(df: pd.DataFrame) -> pd.DataFrame:
     return summary.sort_values(["Gesamtanspruch_gegen_Haus", "Privat_vorgelegt"], ascending=[False, False])
 
 
+def party_expense_mask(df: pd.DataFrame) -> pd.Series:
+    is_party_spend = (
+        (df["Transaktions_Typ"] == "Ausgabe/Einkauf")
+        | (
+            (df["Transaktions_Typ"] == "Geplante Ausgabe")
+            & (df["Status"] == STATUS_PAID_BY_HOUSE)
+        )
+    )
+    return is_party_spend & (~df["Ist_Investition"].fillna(False))
+
+
+def planned_party_mask(df: pd.DataFrame) -> pd.Series:
+    is_planned_party = (
+        (df["Transaktions_Typ"] == "Geplante Ausgabe")
+        & (df["Status"] == STATUS_PLANNED)
+    )
+    return is_planned_party & (~df["Ist_Investition"].fillna(False))
+
+
 st.set_page_config(page_title="Treppenhausparty - Finanzen", page_icon="EUR", layout="wide")
 st.title("Treppenhausparty - Finanzuebersicht")
 st.caption("Einzahlungen, Ausgaben, offene Erstattungen und geplante Kosten an einem Ort.")
@@ -281,7 +357,25 @@ with entry_tab:
         st.caption("Falls 'Neuen Namen hinzufuegen...' gewaehlt wurde:")
         neuer_name = st.text_input("Neuer Name")
 
-        betrag = st.number_input("Betrag in EUR", min_value=0.0, step=0.5, format="%.2f")
+        col1, col2 = st.columns(2)
+        with col1:
+            kostenbezeichnung = st.text_input(
+                "Bezeichnung",
+                placeholder="z.B. Bier, Kabelbinder, Kuehlschrank",
+            )
+        with col2:
+            betrag = st.number_input("Betrag in EUR", min_value=0.0, step=0.5, format="%.2f")
+
+        menge_col1, menge_col2, menge_col3 = st.columns([1, 1, 1.2])
+        with menge_col1:
+            anzahl = st.number_input("Anzahl", min_value=0.0, step=1.0, format="%.2f")
+        with menge_col2:
+            einheit = st.text_input("Einheit", placeholder="z.B. Stk., Kisten, Meter")
+        with menge_col3:
+            ist_investition = st.checkbox(
+                "Als Investition markieren",
+                help="Investitionen werden gespeichert, tauchen aber nicht als Partykosten in der Uebersicht auf.",
+            )
 
         # --- Kategorie-spezifische Zusatzfelder ---
         getraenk_name = ""
@@ -357,6 +451,10 @@ with entry_tab:
                 "Kategorie": kategorie,
                 "Bezahlt_Von": paid_by,
                 "Beschreibung": beschreibung,
+                "Kostenbezeichnung": kostenbezeichnung,
+                "Anzahl": anzahl,
+                "Einheit": einheit,
+                "Ist_Investition": "Ja" if ist_investition else "",
                 "Status": status,
                 "Referenz_ID": "",
                 "Getraenk_Name": getraenk_name,
@@ -399,6 +497,28 @@ with planned_tab:
             placeholder="z.B. Restgetraenke, Leihtechnik, Reinigung",
             key="planned_description",
         )
+        pcol1, pcol2, pcol3 = st.columns([1.2, 1, 1.1])
+        with pcol1:
+            planned_label = st.text_input(
+                "Bezeichnung",
+                placeholder="z.B. Restbier, Boxenstativ, Putzmittel",
+                key="planned_label",
+            )
+        with pcol2:
+            planned_quantity = st.number_input(
+                "Anzahl",
+                min_value=0.0,
+                step=1.0,
+                format="%.2f",
+                key="planned_quantity",
+            )
+        with pcol3:
+            planned_unit = st.text_input("Einheit", placeholder="z.B. Stk.", key="planned_unit")
+        planned_investment = st.checkbox(
+            "Als Investition markieren",
+            help="Geplante Investitionen erscheinen nicht in den offenen Partykosten.",
+            key="planned_investment",
+        )
         planned_submit = st.form_submit_button("Geplante Ausgabe speichern")
 
     if planned_submit:
@@ -420,6 +540,10 @@ with planned_tab:
                 "Kategorie": planned_category,
                 "Bezahlt_Von": "",
                 "Beschreibung": planned_description,
+                "Kostenbezeichnung": planned_label,
+                "Anzahl": planned_quantity,
+                "Einheit": planned_unit,
+                "Ist_Investition": "Ja" if planned_investment else "",
                 "Status": STATUS_PLANNED,
                 "Referenz_ID": "",
             }
@@ -436,10 +560,12 @@ with planned_tab:
         st.info("Aktuell gibt es keine offenen geplanten Ausgaben.")
     else:
         planned_display = planned_open_df[
-            ["Name", "Faellig_Am", "Kategorie", "Beschreibung", "Betrag"]
+            ["Name", "Faellig_Am", "Kategorie", "Kostenbezeichnung", "Anzahl", "Einheit", "Beschreibung", "Betrag", "Ist_Investition"]
         ].copy()
         planned_display["Faellig_Am"] = planned_display["Faellig_Am"].dt.strftime("%d.%m.%Y").fillna("-")
         planned_display["Betrag"] = planned_display["Betrag"].map(format_euro)
+        planned_display["Anzahl"] = planned_display["Anzahl"].map(format_quantity)
+        planned_display["Ist_Investition"] = planned_display["Ist_Investition"].map(lambda value: "Ja" if value else "")
         st.dataframe(planned_display, use_container_width=True, hide_index=True)
 
         selection_labels = {
@@ -473,14 +599,7 @@ with overview_tab:
         transactions_df["Transaktions_Typ"] == "Einzahlung auf das Haus", "Betrag"
     ].sum()
     house_direct_spend = transactions_df.loc[
-        (
-            (transactions_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
-            & (transactions_df["Bezahlt_Von"] == HOUSE_PAYER)
-        )
-        | (
-            (transactions_df["Transaktions_Typ"] == "Geplante Ausgabe")
-            & (transactions_df["Status"] == STATUS_PAID_BY_HOUSE)
-        ),
+        party_expense_mask(transactions_df) & (transactions_df["Bezahlt_Von"] == HOUSE_PAYER),
         "Betrag",
     ].sum()
     reimbursements_paid = transactions_df.loc[
@@ -488,8 +607,11 @@ with overview_tab:
     ].sum()
     house_total_paid = house_direct_spend + reimbursements_paid
     planned_total = transactions_df.loc[
-        (transactions_df["Transaktions_Typ"] == "Geplante Ausgabe")
-        & (transactions_df["Status"] == STATUS_PLANNED),
+        planned_party_mask(transactions_df),
+        "Betrag",
+    ].sum()
+    investment_total = transactions_df.loc[
+        transactions_df["Ist_Investition"].fillna(False),
         "Betrag",
     ].sum()
 
@@ -523,6 +645,7 @@ with overview_tab:
         delta=bal_delta,
         delta_color=balance_color,
     )
+    st.caption(f"Als Investition markiert und daher nicht in den Partykosten enthalten: {format_euro(investment_total)}")
 
     # --- Wasserfalldiagramm ---
     st.markdown("### Geldfluss")
@@ -573,11 +696,7 @@ with overview_tab:
     # --- Ausgaben nach Kategorie ---
     st.markdown("### Ausgaben nach Kategorie")
     ausgaben_df = transactions_df[
-        (transactions_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
-        | (
-            (transactions_df["Transaktions_Typ"] == "Geplante Ausgabe")
-            & (transactions_df["Status"] == STATUS_PAID_BY_HOUSE)
-        )
+        party_expense_mask(transactions_df)
     ].copy()
     if ausgaben_df.empty:
         st.info("Noch keine Ausgaben vorhanden.")
@@ -598,6 +717,27 @@ with overview_tab:
             xaxis_title="",
         )
         st.plotly_chart(cat_fig, use_container_width=True)
+
+        st.markdown("### Kosten nach Bezeichnung")
+        detail_df = ausgaben_df.copy()
+        detail_df["Bezeichnung"] = detail_df.apply(build_cost_label, axis=1)
+        detail_df["Effektive_Anzahl"] = detail_df["Anzahl"]
+        getraenke_mask = (detail_df["Effektive_Anzahl"] <= 0) & (detail_df["Getraenk_Anzahl"] > 0)
+        detail_df.loc[getraenke_mask, "Effektive_Anzahl"] = detail_df.loc[getraenke_mask, "Getraenk_Anzahl"]
+        detail_df["Einheit_Anzeige"] = detail_df["Einheit"].astype(str).str.strip()
+
+        detail_summary = (
+            detail_df.groupby(["Kategorie", "Bezeichnung"], dropna=False)
+            .agg(
+                Anzahl=("Effektive_Anzahl", "sum"),
+                Betrag=("Betrag", "sum"),
+            )
+            .reset_index()
+            .sort_values(["Kategorie", "Betrag"], ascending=[True, False])
+        )
+        detail_summary["Anzahl"] = detail_summary["Anzahl"].map(format_quantity)
+        detail_summary["Betrag"] = detail_summary["Betrag"].map(format_euro)
+        st.dataframe(detail_summary, use_container_width=True, hide_index=True)
 
     # --- Personensalden ---
     st.markdown("### Personensalden")
@@ -678,8 +818,10 @@ with overview_tab:
         else:
             open_private_df["Erfasst_Am"] = open_private_df["Erfasst_Am"].dt.strftime("%d.%m.%Y").fillna("-")
             open_private_df["Betrag"] = open_private_df["Betrag"].map(format_euro)
+            open_private_df["Anzahl"] = open_private_df["Anzahl"].map(format_quantity)
+            open_private_df["Ist_Investition"] = open_private_df["Ist_Investition"].map(lambda value: "Ja" if value else "")
             st.dataframe(
-                open_private_df[["Erfasst_Am", "Name", "Kategorie", "Beschreibung", "Betrag", "Status"]],
+                open_private_df[["Erfasst_Am", "Name", "Kategorie", "Kostenbezeichnung", "Anzahl", "Einheit", "Beschreibung", "Betrag", "Status", "Ist_Investition"]],
                 use_container_width=True,
                 hide_index=True,
             )
@@ -701,10 +843,12 @@ with overview_tab:
             st.info("Bisher wurden noch keine Hausausgaben verbucht.")
         else:
             house_spend_df["Betrag"] = house_spend_df["Betrag"].map(format_euro)
+            house_spend_df["Anzahl"] = house_spend_df["Anzahl"].map(format_quantity)
             house_spend_df["Erfasst_Am"] = house_spend_df["Erfasst_Am"].dt.strftime("%d.%m.%Y").fillna("-")
             house_spend_df["Bezahlt_Am"] = house_spend_df["Bezahlt_Am"].dt.strftime("%d.%m.%Y").fillna("-")
+            house_spend_df["Ist_Investition"] = house_spend_df["Ist_Investition"].map(lambda value: "Ja" if value else "")
             st.dataframe(
-                house_spend_df[["Erfasst_Am", "Bezahlt_Am", "Name", "Transaktions_Typ", "Kategorie", "Beschreibung", "Betrag", "Status"]],
+                house_spend_df[["Erfasst_Am", "Bezahlt_Am", "Name", "Transaktions_Typ", "Kategorie", "Kostenbezeichnung", "Anzahl", "Einheit", "Beschreibung", "Betrag", "Status", "Ist_Investition"]],
                 use_container_width=True,
                 hide_index=True,
             )
@@ -735,6 +879,8 @@ with overview_tab:
             for date_col in ["Erfasst_Am", "Faellig_Am", "Bezahlt_Am"]:
                 ledger_df[date_col] = ledger_df[date_col].dt.strftime("%d.%m.%Y").fillna("-")
             ledger_df["Betrag"] = ledger_df["Betrag"].map(format_euro)
+            ledger_df["Anzahl"] = ledger_df["Anzahl"].map(format_quantity)
+            ledger_df["Ist_Investition"] = ledger_df["Ist_Investition"].map(lambda value: "Ja" if value else "")
             st.dataframe(
                 ledger_df[
                     [
@@ -745,8 +891,12 @@ with overview_tab:
                         "Transaktions_Typ",
                         "Kategorie",
                         "Bezahlt_Von",
+                        "Kostenbezeichnung",
+                        "Anzahl",
+                        "Einheit",
                         "Beschreibung",
                         "Betrag",
+                        "Ist_Investition",
                         "Status",
                     ]
                 ],
