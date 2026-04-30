@@ -939,8 +939,7 @@ with overview_tab:
     liquide_mittel = house_income - house_total_paid
     house_balance_after_obligations = liquide_mittel - open_to_people - planned_total
 
-    # --- Metriken: Zeile 1 (Liquidität) ---
-    st.markdown("#### Hauskasse auf einen Blick")
+    # --- Übersicht-Header ---
     ohne_anfang = st.toggle(
         "Anfangsbestand herausrechnen (Gewinn/Verlust-Sicht)",
         value=False,
@@ -956,42 +955,72 @@ with overview_tab:
         liquide_mittel_angepasst = liquide_mittel
         balance_angepasst = house_balance_after_obligations
 
-    row1 = st.columns(4)
-    row1[0].metric("Startbestand Haus", format_euro(initial_house_funding))
-    row1[1].metric("Einzahlungen Personen", format_euro(people_deposits))
-    row1[2].metric("Einnahmen Party", format_euro(party_income))
-    liq_delta = f"{'+' if liquide_mittel_angepasst >= 0 else ''}{liquide_mittel_angepasst:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
-    row1[3].metric(
-        "Liquide Mittel (Kasse)" if not ohne_anfang else "Liquide Mittel (ohne Anfangsbestand)",
-        format_euro(liquide_mittel_angepasst),
-        delta=liq_delta,
-        delta_color="normal" if liquide_mittel_angepasst >= 0 else "inverse",
-    )
+    bal_color_hex = "#15803d" if balance_angepasst >= 0 else "#b91c1c"
+    bal_sign = "+" if balance_angepasst >= 0 else ""
 
-    # --- Metriken: Zeile 2 (Verpflichtungen & Endstand) ---
-    row2 = st.columns(3)
-    row2[0].metric("Partykosten gesamt", format_euro(party_total))
-    row2[1].metric("Investitionen gesamt", format_euro(investment_total))
-    row2[2].metric("Erstattungen gezahlt", format_euro(reimbursements_paid))
+    def detail_line(label, value):
+        return (
+            f"<div style='display:flex;justify-content:space-between;padding:3px 0;"
+            f"border-bottom:1px solid #2a2a2a;font-size:0.82rem'>"
+            f"<span style='color:#888'>{label}</span>"
+            f"<span>{format_euro(value)}</span></div>"
+        )
 
-    row3 = st.columns(4)
-    row3[0].metric("Ansprueche gesamt", format_euro(open_to_people))
-    row3[1].metric("Privat vorgelegt Party", format_euro(private_party_total))
-    row3[2].metric("Privat vorgelegt Invest.", format_euro(private_investment_total))
-    balance_color = "normal" if balance_angepasst >= 0 else "inverse"
-    bal_delta = f"{'+' if balance_angepasst >= 0 else ''}{balance_angepasst:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
-    row3[3].metric(
-        "Hausbestand nach allem" if not ohne_anfang else "Gewinn/Verlust (ohne Anfangsbestand)",
-        format_euro(balance_angepasst),
-        delta=bal_delta,
-        delta_color=balance_color,
-    )
-    st.caption(
-        f"Noch offen: geplante Partykosten {format_euro(planned_total)} | geplante Investitionen {format_euro(planned_investment_total)}"
-    )
-    st.caption(
-        "Investitionen erscheinen nicht als Partykosten, privat vorgelegte Investitionen bleiben aber als Rueckzahlungsanspruch bestehen."
-    )
+    col_ein, col_aus, col_bil = st.columns(3)
+
+    with col_ein:
+        with st.container(border=True):
+            st.markdown(
+                "<div style='font-size:0.75rem;color:#888;text-transform:uppercase;"
+                "letter-spacing:0.08em;margin-bottom:4px'>Einnahmen</div>"
+                f"<div style='font-size:2rem;font-weight:700;margin-bottom:8px'>"
+                f"{format_euro(income_basis)}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                detail_line("Startbestand" if not ohne_anfang else "Startbestand (ausgeblendet)",
+                            initial_house_funding if not ohne_anfang else 0)
+                + detail_line("Einzahlungen Personen", people_deposits)
+                + detail_line("Einnahmen Party", party_income),
+                unsafe_allow_html=True,
+            )
+
+    with col_aus:
+        with st.container(border=True):
+            st.markdown(
+                "<div style='font-size:0.75rem;color:#888;text-transform:uppercase;"
+                "letter-spacing:0.08em;margin-bottom:4px'>Ausgaben & Verpflichtungen</div>"
+                f"<div style='font-size:2rem;font-weight:700;margin-bottom:8px'>"
+                f"{format_euro(house_total_paid + open_to_people + planned_total)}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                detail_line("Partykosten bezahlt", party_direct_spend)
+                + detail_line("Investitionen bezahlt", investment_direct_spend)
+                + detail_line("Erstattungen gezahlt", reimbursements_paid)
+                + detail_line("Offene Ansprüche", open_to_people)
+                + detail_line("Geplante Kosten (offen)", planned_total),
+                unsafe_allow_html=True,
+            )
+
+    with col_bil:
+        with st.container(border=True):
+            st.markdown(
+                "<div style='font-size:0.75rem;color:#888;text-transform:uppercase;"
+                "letter-spacing:0.08em;margin-bottom:4px'>"
+                + ("Gewinn / Verlust" if ohne_anfang else "Kassenbestand")
+                + "</div>"
+                f"<div style='font-size:2rem;font-weight:700;color:{bal_color_hex};margin-bottom:8px'>"
+                f"{bal_sign}{format_euro(balance_angepasst)}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                detail_line("Liquide Mittel", liquide_mittel_angepasst)
+                + detail_line("Privat vorgelegt (Party)", private_party_total)
+                + detail_line("Privat vorgelegt (Invest.)", private_investment_total)
+                + detail_line("Geplante Investitionen", planned_investment_total),
+                unsafe_allow_html=True,
+            )
 
     # --- Wasserfalldiagramm ---
     st.markdown("### Geldfluss")
