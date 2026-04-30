@@ -1268,8 +1268,22 @@ with overview_tab:
         getraenke_mask = (detail_df["Effektive_Anzahl"] <= 0) & (detail_df["Getraenk_Anzahl"] > 0)
         detail_df.loc[getraenke_mask, "Effektive_Anzahl"] = detail_df.loc[getraenke_mask, "Getraenk_Anzahl"]
 
+        available_kats = sorted(detail_df["Kategorie"].dropna().astype(str).unique())
+        all_label = "Alle"
+        filter_options = [all_label] + available_kats
+        selected_kats = st.multiselect(
+            "Kategorien filtern",
+            options=available_kats,
+            default=available_kats,
+            key="pie_kat_filter",
+            format_func=lambda k: k,
+        )
+        if not selected_kats:
+            selected_kats = available_kats
+        filtered_detail_df = detail_df[detail_df["Kategorie"].astype(str).isin(selected_kats)]
+
         detail_summary = (
-            detail_df.groupby(["Bezeichnung", "Kategorie"], dropna=False)
+            filtered_detail_df.groupby(["Bezeichnung", "Kategorie"], dropna=False)
             .agg(
                 Anzahl=("Effektive_Anzahl", "sum"),
                 Betrag=("Betrag", "sum"),
@@ -1301,15 +1315,6 @@ with overview_tab:
             legend={"orientation": "v", "x": 1.02, "y": 0.5},
         )
         st.plotly_chart(detail_pie, use_container_width=True)
-
-        # Legende der Kategoriefarben
-        color_items = " &nbsp;&nbsp; ".join(
-            f'<span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:{c};margin-right:4px;vertical-align:middle"></span>{k}'
-            for k, c in KATEGORIE_COLORS.items()
-            if k in detail_summary["Kategorie"].values
-        )
-        if color_items:
-            st.markdown(f"<div style='font-size:0.75rem;color:#aaa'>{color_items}</div>", unsafe_allow_html=True)
 
     # --- Personensalden ---
     st.markdown("### Personensalden")
