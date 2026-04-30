@@ -939,7 +939,7 @@ with overview_tab:
     liquide_mittel = house_income - house_total_paid
     house_balance_after_obligations = liquide_mittel - open_to_people - planned_total
 
-    # --- Übersicht-Header ---
+    # --- Übersicht-Header (3 Karten) ---
     ohne_anfang = st.toggle(
         "Anfangsbestand herausrechnen (Gewinn/Verlust-Sicht)",
         value=False,
