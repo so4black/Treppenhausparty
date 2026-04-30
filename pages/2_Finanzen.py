@@ -445,8 +445,8 @@ def initial_house_funding_mask(df: pd.DataFrame) -> pd.Series:
     )
 
 
-st.set_page_config(page_title="Treppenhausparty - Finanzen", page_icon="EUR", layout="wide")
-st.title("Treppenhausparty - Finanzuebersicht")
+st.set_page_config(page_title="THP Finanzen", page_icon="💰", layout="wide")
+st.title("Treppenhausparty – Finanzen")
 st.caption("Einzahlungen, Ausgaben, offene Erstattungen und geplante Kosten an einem Ort.")
 
 transactions_df = load_transactions()
