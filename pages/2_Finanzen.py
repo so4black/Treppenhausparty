@@ -5,6 +5,8 @@ from datetime import date, datetime
 from pathlib import Path
 
 import gspread
+import matplotlib
+import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -23,6 +25,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 from streamlit.errors import StreamlitSecretNotFoundError
+
+matplotlib.use("Agg")
 
 
 SPREADSHEET_ID = "1z6pVOSBNUcrWAdmgQfuqfNpvlwBYUkPmd58Xu29kj-U"
@@ -175,10 +179,80 @@ def format_date_value(value) -> str:
     return str(value)
 
 
-def _fig_to_image(fig: go.Figure, width_pt: float, height_px: int = 320) -> Image:
-    page_width_px = int(width_pt * 96 / 72)
-    png = fig.to_image(format="png", width=page_width_px, height=height_px, scale=2)
-    return Image(io.BytesIO(png), width=width_pt, height=width_pt * height_px / page_width_px)
+def _mpl_to_image(fig, width_pt: float) -> Image:
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    from PIL import Image as PILImage
+    pil = PILImage.open(buf)
+    w_px, h_px = pil.size
+    height_pt = width_pt * h_px / w_px
+    buf.seek(0)
+    return Image(buf, width=width_pt, height=height_pt)
+
+
+def _bar_chart(labels, values, color="#1d4ed8", horizontal=False, figsize=(8, 3)) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=figsize, facecolor="white")
+    ax.set_facecolor("white")
+    if horizontal:
+        bars = ax.barh(labels, values, color=color)
+        for bar, val in zip(bars, values):
+            ax.text(val + max(values) * 0.01, bar.get_y() + bar.get_height() / 2,
+                    format_euro(val), va="center", ha="left", fontsize=8)
+        ax.set_xlabel("EUR", fontsize=8)
+        ax.xaxis.set_tick_params(labelsize=8)
+        ax.yaxis.set_tick_params(labelsize=8)
+    else:
+        bars = ax.bar(labels, values, color=color)
+        for bar, val in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width() / 2, val + max(values) * 0.01,
+                    format_euro(val), ha="center", va="bottom", fontsize=7, rotation=20)
+        ax.set_ylabel("EUR", fontsize=8)
+        ax.xaxis.set_tick_params(labelsize=8)
+        ax.yaxis.set_tick_params(labelsize=8)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    return fig
+
+
+def _waterfall_chart(labels, values, measures, figsize=(10, 3.5)) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=figsize, facecolor="white")
+    ax.set_facecolor("white")
+    running = 0.0
+    bottoms, heights, bar_colors = [], [], []
+    for measure, val in zip(measures, values):
+        if measure == "absolute":
+            bottoms.append(0)
+            heights.append(val)
+            running = val
+        elif measure == "relative":
+            bottoms.append(min(running, running + val))
+            heights.append(abs(val))
+            running += val
+        else:  # total
+            bottoms.append(0)
+            heights.append(running)
+    for i, (measure, val) in enumerate(zip(measures, values)):
+        if measure == "total":
+            bar_colors.append("#1d4ed8")
+        elif val >= 0:
+            bar_colors.append("#15803d")
+        else:
+            bar_colors.append("#b91c1c")
+    x = range(len(labels))
+    ax.bar(x, heights, bottom=bottoms, color=bar_colors, width=0.6)
+    for i, (b, h, val) in enumerate(zip(bottoms, heights, values)):
+        top = b + h
+        ax.text(i, top + max(heights) * 0.015, format_euro(abs(val)),
+                ha="center", va="bottom", fontsize=7, rotation=30)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(labels, fontsize=7, rotation=20, ha="right")
+    ax.set_ylabel("EUR", fontsize=8)
+    ax.yaxis.set_tick_params(labelsize=8)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    return fig
 
 
 def build_pdf_report(
@@ -294,29 +368,16 @@ def build_pdf_report(
 
     # --- Geldfluss-Wasserfall ---
     if ohne_anfang:
-        wf_labels   = ["Einzahlungen Personen", "Einnahmen Party", "Ausgaben", "Liquide Mittel", "Auslagen offen", "Geplante Kosten", "Endbestand"]
+        wf_labels   = ["Einzahl.\nPersonen", "Einnahmen\nParty", "Ausgaben", "Liquide\nMittel", "Auslagen\noffen", "Geplante\nKosten", "Endbestand"]
         wf_measures = ["absolute", "relative", "relative", "total", "relative", "relative", "total"]
         wf_y        = [people_deposits, party_income, -(party_direct_spend + investment_direct_spend + reimbursements_paid), liquide_mittel, -open_to_people, -planned_total, balance]
     else:
-        wf_labels   = ["Anfangsbestand", "Einzahlungen Personen", "Einnahmen Party", "Ausgaben", "Liquide Mittel", "Auslagen offen", "Geplante Kosten", "Endbestand"]
+        wf_labels   = ["Anfangs-\nbestand", "Einzahl.\nPersonen", "Einnahmen\nParty", "Ausgaben", "Liquide\nMittel", "Auslagen\noffen", "Geplante\nKosten", "Endbestand"]
         wf_measures = ["absolute", "relative", "relative", "relative", "total", "relative", "relative", "total"]
         wf_y        = [initial_house_funding, people_deposits, party_income, -(party_direct_spend + investment_direct_spend + reimbursements_paid), liquide_mittel, -open_to_people, -planned_total, balance]
-    wf_text = [fe(abs(v)) for v in wf_y]
-    wf_fig = go.Figure(go.Waterfall(
-        orientation="v", measure=wf_measures, x=wf_labels, y=wf_y, text=wf_text,
-        textposition="outside",
-        increasing={"marker": {"color": "#15803d"}},
-        decreasing={"marker": {"color": "#b91c1c"}},
-        totals={"marker": {"color": "#1d4ed8"}},
-        connector={"line": {"color": "#94a3b8"}},
-    ))
-    wf_fig.update_layout(
-        height=340, margin={"l": 30, "r": 20, "t": 20, "b": 60},
-        yaxis_title="EUR", showlegend=False,
-        paper_bgcolor="white", plot_bgcolor="white", font={"color": "#1e293b"},
-    )
     elements.append(Paragraph("Geldfluss", H2))
-    elements.append(_fig_to_image(wf_fig, PAGE_W, height_px=280))
+    wf_fig = _waterfall_chart(wf_labels, wf_y, wf_measures, figsize=(9, 3.5))
+    elements.append(_mpl_to_image(wf_fig, PAGE_W))
     elements.append(Spacer(1, 10))
 
     # --- Ausgaben nach Kategorie ---
@@ -336,19 +397,8 @@ def build_pdf_report(
         cat_sum = ausgaben_df.groupby("Kategorie")["Betrag"].sum().sort_values(ascending=False)
 
         # Chart
-        cat_fig = go.Figure(go.Bar(
-            x=cat_sum.index.tolist(),
-            y=cat_sum.values.tolist(),
-            text=[fe(v) for v in cat_sum.values],
-            textposition="outside",
-            marker_color="#1d4ed8",
-        ))
-        cat_fig.update_layout(
-            height=280, margin={"l": 30, "r": 20, "t": 20, "b": 60},
-            yaxis_title="EUR", showlegend=False,
-            paper_bgcolor="white", plot_bgcolor="white", font={"color": "#1e293b"},
-        )
-        elements.append(_fig_to_image(cat_fig, PAGE_W, height_px=240))
+        cat_fig = _bar_chart(cat_sum.index.tolist(), cat_sum.values.tolist(), color="#1d4ed8", figsize=(8, 3))
+        elements.append(_mpl_to_image(cat_fig, PAGE_W))
         elements.append(Spacer(1, 6))
 
         # Tabelle daneben
@@ -377,22 +427,15 @@ def build_pdf_report(
         # Ansprüche-Chart
         anspruch_df = person_summary[person_summary["Gesamtanspruch_gegen_Haus"] > 0].copy()
         if not anspruch_df.empty:
-            anspruch_fig = go.Figure(go.Bar(
-                x=anspruch_df["Gesamtanspruch_gegen_Haus"].tolist(),
-                y=anspruch_df["Name"].tolist(),
-                orientation="h",
-                text=[fe(v) for v in anspruch_df["Gesamtanspruch_gegen_Haus"]],
-                textposition="outside",
-                marker_color="#7c3aed",
-            ))
-            anspruch_fig.update_layout(
-                height=max(220, 60 + len(anspruch_df) * 40),
-                margin={"l": 10, "r": 80, "t": 20, "b": 20},
-                xaxis_title="EUR", showlegend=False,
-                paper_bgcolor="white", plot_bgcolor="white", font={"color": "#1e293b"},
-                yaxis={"categoryorder": "total ascending"},
+            n = len(anspruch_df)
+            anspruch_fig = _bar_chart(
+                anspruch_df["Name"].tolist(),
+                anspruch_df["Gesamtanspruch_gegen_Haus"].tolist(),
+                color="#7c3aed",
+                horizontal=True,
+                figsize=(8, max(2.5, 0.5 * n + 0.8)),
             )
-            elements.append(_fig_to_image(anspruch_fig, PAGE_W, height_px=max(220, 60 + len(anspruch_df) * 40)))
+            elements.append(_mpl_to_image(anspruch_fig, PAGE_W))
             elements.append(Spacer(1, 6))
 
         ps_headers = ["Name", "Eingezahlt", "Privat Party", "Privat Invest.", "Erstattet", "Auslage offen", "Anspruch"]

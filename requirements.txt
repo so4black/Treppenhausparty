@@ -3,4 +3,5 @@ pandas
 plotly
 gspread
 reportlab
-kaleido
+matplotlib
+Pillow
