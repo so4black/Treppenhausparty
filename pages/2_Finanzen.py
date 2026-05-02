@@ -15,6 +15,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     HRFlowable,
+    Image,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -174,6 +175,12 @@ def format_date_value(value) -> str:
     return str(value)
 
 
+def _fig_to_image(fig: go.Figure, width_pt: float, height_px: int = 320) -> Image:
+    page_width_px = int(width_pt * 96 / 72)
+    png = fig.to_image(format="png", width=page_width_px, height=height_px, scale=2)
+    return Image(io.BytesIO(png), width=width_pt, height=width_pt * height_px / page_width_px)
+
+
 def build_pdf_report(
     initial_house_funding,
     people_deposits,
@@ -191,6 +198,7 @@ def build_pdf_report(
     ohne_anfang: bool,
 ) -> bytes:
     buf = io.BytesIO()
+    PAGE_W = A4[0] - 36 * mm
     doc = SimpleDocTemplate(
         buf,
         pagesize=A4,
@@ -219,9 +227,8 @@ def build_pdf_report(
         return format_euro(v)
 
     def section_table(rows, col_widths=None):
-        w = A4[0] - 36 * mm
         if col_widths is None:
-            col_widths = [w * 0.6, w * 0.4]
+            col_widths = [PAGE_W * 0.6, PAGE_W * 0.4]
         t = Table(rows, colWidths=col_widths)
         t.setStyle(TableStyle([
             ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -255,31 +262,24 @@ def build_pdf_report(
         ["Einzahlungen Personen", fe(people_deposits)],
         ["Einnahmen Party", fe(party_income)],
         ["Einnahmen gesamt", fe(income_basis)],
-    ]
-    overview_rows.append(["", ""])
-    overview_rows += [
+        ["", ""],
         ["Partykosten bezahlt", fe(party_direct_spend)],
         ["Investitionen bezahlt", fe(investment_direct_spend)],
         ["Erstattungen gezahlt", fe(reimbursements_paid)],
         ["Offene Ansprüche (Personen)", fe(open_to_people)],
         ["Geplante Kosten (offen)", fe(planned_total)],
-    ]
-    overview_rows.append(["", ""])
-    overview_rows += [
+        ["", ""],
         ["Liquide Mittel (Kasse)", fe(liquide_mittel)],
     ]
-    t_overview = section_table(overview_rows)
-    elements.append(t_overview)
+    elements.append(section_table(overview_rows))
     elements.append(Spacer(1, 4))
 
-    # Bilanz-Zeile farbig hervorheben
     bal_color = GREEN if balance >= 0 else RED
     bal_label = "Gewinn / Verlust" if ohne_anfang else "Hausbestand nach allem"
     bal_sign = "+" if balance >= 0 else ""
-    w = A4[0] - 36 * mm
     bal_table = Table(
         [[Paragraph(f"<b>{bal_label}</b>", BODY), Paragraph(f"<b>{bal_sign}{fe(balance)}</b>", RIGHT)]],
-        colWidths=[w * 0.6, w * 0.4],
+        colWidths=[PAGE_W * 0.6, PAGE_W * 0.4],
     )
     bal_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), bal_color),
@@ -288,10 +288,36 @@ def build_pdf_report(
         ("TOPPADDING", (0, 0), (-1, -1), 5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("ROUNDEDCORNERS", [4, 4, 4, 4]),
     ]))
     elements.append(bal_table)
-    elements.append(Spacer(1, 8))
+    elements.append(Spacer(1, 10))
+
+    # --- Geldfluss-Wasserfall ---
+    if ohne_anfang:
+        wf_labels   = ["Einzahlungen Personen", "Einnahmen Party", "Ausgaben", "Liquide Mittel", "Auslagen offen", "Geplante Kosten", "Endbestand"]
+        wf_measures = ["absolute", "relative", "relative", "total", "relative", "relative", "total"]
+        wf_y        = [people_deposits, party_income, -(party_direct_spend + investment_direct_spend + reimbursements_paid), liquide_mittel, -open_to_people, -planned_total, balance]
+    else:
+        wf_labels   = ["Anfangsbestand", "Einzahlungen Personen", "Einnahmen Party", "Ausgaben", "Liquide Mittel", "Auslagen offen", "Geplante Kosten", "Endbestand"]
+        wf_measures = ["absolute", "relative", "relative", "relative", "total", "relative", "relative", "total"]
+        wf_y        = [initial_house_funding, people_deposits, party_income, -(party_direct_spend + investment_direct_spend + reimbursements_paid), liquide_mittel, -open_to_people, -planned_total, balance]
+    wf_text = [fe(abs(v)) for v in wf_y]
+    wf_fig = go.Figure(go.Waterfall(
+        orientation="v", measure=wf_measures, x=wf_labels, y=wf_y, text=wf_text,
+        textposition="outside",
+        increasing={"marker": {"color": "#15803d"}},
+        decreasing={"marker": {"color": "#b91c1c"}},
+        totals={"marker": {"color": "#1d4ed8"}},
+        connector={"line": {"color": "#94a3b8"}},
+    ))
+    wf_fig.update_layout(
+        height=340, margin={"l": 30, "r": 20, "t": 20, "b": 60},
+        yaxis_title="EUR", showlegend=False,
+        paper_bgcolor="white", plot_bgcolor="white", font={"color": "#1e293b"},
+    )
+    elements.append(Paragraph("Geldfluss", H2))
+    elements.append(_fig_to_image(wf_fig, PAGE_W, height_px=280))
+    elements.append(Spacer(1, 10))
 
     # --- Ausgaben nach Kategorie ---
     ausgaben_df = transactions_df[
@@ -308,10 +334,28 @@ def build_pdf_report(
     if not ausgaben_df.empty:
         elements.append(Paragraph("Ausgaben nach Kategorie", H2))
         cat_sum = ausgaben_df.groupby("Kategorie")["Betrag"].sum().sort_values(ascending=False)
+
+        # Chart
+        cat_fig = go.Figure(go.Bar(
+            x=cat_sum.index.tolist(),
+            y=cat_sum.values.tolist(),
+            text=[fe(v) for v in cat_sum.values],
+            textposition="outside",
+            marker_color="#1d4ed8",
+        ))
+        cat_fig.update_layout(
+            height=280, margin={"l": 30, "r": 20, "t": 20, "b": 60},
+            yaxis_title="EUR", showlegend=False,
+            paper_bgcolor="white", plot_bgcolor="white", font={"color": "#1e293b"},
+        )
+        elements.append(_fig_to_image(cat_fig, PAGE_W, height_px=240))
+        elements.append(Spacer(1, 6))
+
+        # Tabelle daneben
         cat_rows = [
             [Paragraph("<b>Kategorie</b>", BODY), Paragraph("<b>Betrag</b>", RIGHT)]
         ] + [[k, fe(v)] for k, v in cat_sum.items()]
-        t_cat = Table(cat_rows, colWidths=[w * 0.6, w * 0.4])
+        t_cat = Table(cat_rows, colWidths=[PAGE_W * 0.6, PAGE_W * 0.4])
         t_cat.setStyle(TableStyle([
             ("FONTSIZE", (0, 0), (-1, -1), 9),
             ("LEADING", (0, 0), (-1, -1), 13),
@@ -324,15 +368,35 @@ def build_pdf_report(
             ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ]))
         elements.append(t_cat)
-        elements.append(Spacer(1, 8))
+        elements.append(Spacer(1, 10))
 
     # --- Personensalden ---
     if not person_summary.empty:
         elements.append(Paragraph("Personensalden", H2))
-        ps_cols = ["Name", "Einzahlungen", "Privat_vorgelegt_Party", "Privat_vorgelegt_Investition", "Rueckerstattungen", "Offene_Auslagen", "Gesamtanspruch_gegen_Haus"]
+
+        # Ansprüche-Chart
+        anspruch_df = person_summary[person_summary["Gesamtanspruch_gegen_Haus"] > 0].copy()
+        if not anspruch_df.empty:
+            anspruch_fig = go.Figure(go.Bar(
+                x=anspruch_df["Gesamtanspruch_gegen_Haus"].tolist(),
+                y=anspruch_df["Name"].tolist(),
+                orientation="h",
+                text=[fe(v) for v in anspruch_df["Gesamtanspruch_gegen_Haus"]],
+                textposition="outside",
+                marker_color="#7c3aed",
+            ))
+            anspruch_fig.update_layout(
+                height=max(220, 60 + len(anspruch_df) * 40),
+                margin={"l": 10, "r": 80, "t": 20, "b": 20},
+                xaxis_title="EUR", showlegend=False,
+                paper_bgcolor="white", plot_bgcolor="white", font={"color": "#1e293b"},
+                yaxis={"categoryorder": "total ascending"},
+            )
+            elements.append(_fig_to_image(anspruch_fig, PAGE_W, height_px=max(220, 60 + len(anspruch_df) * 40)))
+            elements.append(Spacer(1, 6))
+
         ps_headers = ["Name", "Eingezahlt", "Privat Party", "Privat Invest.", "Erstattet", "Auslage offen", "Anspruch"]
-        cw = A4[0] - 36 * mm
-        col_ws = [cw * 0.18, cw * 0.13, cw * 0.13, cw * 0.13, cw * 0.13, cw * 0.14, cw * 0.16]
+        col_ws = [PAGE_W * 0.18, PAGE_W * 0.13, PAGE_W * 0.13, PAGE_W * 0.13, PAGE_W * 0.13, PAGE_W * 0.14, PAGE_W * 0.16]
         header_row = [Paragraph(f"<b>{h}</b>", CENTER) for h in ps_headers]
         data_rows = []
         for _, row in person_summary.iterrows():
@@ -359,20 +423,27 @@ def build_pdf_report(
             ("ALIGN", (0, 0), (0, -1), "LEFT"),
         ]))
         elements.append(ps_table)
-        elements.append(Spacer(1, 8))
+        elements.append(Spacer(1, 10))
 
     # --- Einzelposten-Tabelle ---
-    elements.append(Paragraph("Alle Transaktionen", H2))
-    tx_cols = ["Erfasst_Am", "Name", "Transaktions_Typ", "Kategorie", "Kostenbezeichnung", "Betrag", "Status"]
+    # Spaltenbreiten: Datum breit genug für "dd.mm.yyyy" ohne Umbruch
     tx_headers = ["Datum", "Person", "Typ", "Kategorie", "Bezeichnung", "Betrag", "Status"]
-    tx_cw = A4[0] - 36 * mm
-    tx_col_ws = [tx_cw * 0.10, tx_cw * 0.11, tx_cw * 0.16, tx_cw * 0.12, tx_cw * 0.22, tx_cw * 0.14, tx_cw * 0.15]
+    tx_col_ws = [
+        PAGE_W * 0.13,  # Datum  — breit genug für dd.mm.yyyy
+        PAGE_W * 0.11,  # Person
+        PAGE_W * 0.16,  # Typ
+        PAGE_W * 0.11,  # Kategorie
+        PAGE_W * 0.22,  # Bezeichnung
+        PAGE_W * 0.14,  # Betrag
+        PAGE_W * 0.13,  # Status
+    ]
+    NOBR = ParagraphStyle("NOBR", parent=base["Normal"], fontSize=8, leading=10, wordWrap=None)
     tx_header_row = [Paragraph(f"<b>{h}</b>", CENTER) for h in tx_headers]
     tx_data = []
     for _, row in transactions_df.sort_values("Erfasst_Am").iterrows():
         datum = row["Erfasst_Am"].strftime("%d.%m.%Y") if pd.notna(row["Erfasst_Am"]) else "-"
         tx_data.append([
-            Paragraph(datum, BODY),
+            Paragraph(datum, NOBR),
             Paragraph(str(row.get("Name", "")), BODY),
             Paragraph(str(row.get("Transaktions_Typ", "")), BODY),
             Paragraph(str(row.get("Kategorie", "")), BODY),
@@ -392,6 +463,7 @@ def build_pdf_report(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
         ("ALIGN", (5, 0), (5, -1), "RIGHT"),
     ]))
+    elements.append(Paragraph("Alle Transaktionen", H2))
     elements.append(tx_table)
 
     doc.build(elements)
