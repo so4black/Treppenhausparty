@@ -1,3 +1,4 @@
+import io
 import json
 import math
 from datetime import date, datetime
@@ -7,6 +8,19 @@ import gspread
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import (
+    HRFlowable,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 from streamlit.errors import StreamlitSecretNotFoundError
 
 
@@ -158,6 +172,230 @@ def format_date_value(value) -> str:
     if isinstance(value, pd.Timestamp):
         return value.strftime("%d.%m.%Y")
     return str(value)
+
+
+def build_pdf_report(
+    initial_house_funding,
+    people_deposits,
+    party_income,
+    income_basis,
+    party_direct_spend,
+    investment_direct_spend,
+    reimbursements_paid,
+    open_to_people,
+    planned_total,
+    liquide_mittel,
+    balance,
+    person_summary: pd.DataFrame,
+    transactions_df: pd.DataFrame,
+    ohne_anfang: bool,
+) -> bytes:
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=18 * mm,
+        rightMargin=18 * mm,
+        topMargin=16 * mm,
+        bottomMargin=16 * mm,
+    )
+
+    base = getSampleStyleSheet()
+    H1 = ParagraphStyle("H1", parent=base["Heading1"], fontSize=18, spaceAfter=2, textColor=colors.HexColor("#1d4ed8"))
+    H2 = ParagraphStyle("H2", parent=base["Heading2"], fontSize=12, spaceBefore=10, spaceAfter=3, textColor=colors.HexColor("#334155"))
+    BODY = ParagraphStyle("BODY", parent=base["Normal"], fontSize=9, leading=13)
+    CAPTION = ParagraphStyle("CAPTION", parent=base["Normal"], fontSize=8, textColor=colors.HexColor("#64748b"))
+    RIGHT = ParagraphStyle("RIGHT", parent=base["Normal"], fontSize=9, alignment=TA_RIGHT)
+    CENTER = ParagraphStyle("CENTER", parent=base["Normal"], fontSize=9, alignment=TA_CENTER)
+
+    BLUE = colors.HexColor("#1d4ed8")
+    GREEN = colors.HexColor("#15803d")
+    RED = colors.HexColor("#b91c1c")
+    LIGHT = colors.HexColor("#f1f5f9")
+    MID = colors.HexColor("#e2e8f0")
+    DARK = colors.HexColor("#1e293b")
+
+    def fe(v):
+        return format_euro(v)
+
+    def section_table(rows, col_widths=None):
+        w = A4[0] - 36 * mm
+        if col_widths is None:
+            col_widths = [w * 0.6, w * 0.4]
+        t = Table(rows, colWidths=col_widths)
+        t.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("LEADING", (0, 0), (-1, -1), 13),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#475569")),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.3, colors.HexColor("#e2e8f0")),
+            ("ROWBACKGROUNDS", (0, 0), (-1, -1), [colors.white, LIGHT]),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        return t
+
+    elements = []
+
+    # --- Titel ---
+    elements.append(Paragraph("Treppenhausparty – Finanzbericht", H1))
+    elements.append(Paragraph(
+        f"Erstellt am {date.today().strftime('%d.%m.%Y')}"
+        + (" · Gewinn/Verlust-Sicht (ohne Anfangsbestand)" if ohne_anfang else ""),
+        CAPTION,
+    ))
+    elements.append(HRFlowable(width="100%", thickness=1.5, color=BLUE, spaceAfter=8))
+
+    # --- Hauskasse Übersicht ---
+    elements.append(Paragraph("Hauskasse auf einen Blick", H2))
+    overview_rows = []
+    if not ohne_anfang:
+        overview_rows.append(["Startbestand Haus", fe(initial_house_funding)])
+    overview_rows += [
+        ["Einzahlungen Personen", fe(people_deposits)],
+        ["Einnahmen Party", fe(party_income)],
+        ["Einnahmen gesamt", fe(income_basis)],
+    ]
+    overview_rows.append(["", ""])
+    overview_rows += [
+        ["Partykosten bezahlt", fe(party_direct_spend)],
+        ["Investitionen bezahlt", fe(investment_direct_spend)],
+        ["Erstattungen gezahlt", fe(reimbursements_paid)],
+        ["Offene Ansprüche (Personen)", fe(open_to_people)],
+        ["Geplante Kosten (offen)", fe(planned_total)],
+    ]
+    overview_rows.append(["", ""])
+    overview_rows += [
+        ["Liquide Mittel (Kasse)", fe(liquide_mittel)],
+    ]
+    t_overview = section_table(overview_rows)
+    elements.append(t_overview)
+    elements.append(Spacer(1, 4))
+
+    # Bilanz-Zeile farbig hervorheben
+    bal_color = GREEN if balance >= 0 else RED
+    bal_label = "Gewinn / Verlust" if ohne_anfang else "Hausbestand nach allem"
+    bal_sign = "+" if balance >= 0 else ""
+    w = A4[0] - 36 * mm
+    bal_table = Table(
+        [[Paragraph(f"<b>{bal_label}</b>", BODY), Paragraph(f"<b>{bal_sign}{fe(balance)}</b>", RIGHT)]],
+        colWidths=[w * 0.6, w * 0.4],
+    )
+    bal_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), bal_color),
+        ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("ROUNDEDCORNERS", [4, 4, 4, 4]),
+    ]))
+    elements.append(bal_table)
+    elements.append(Spacer(1, 8))
+
+    # --- Ausgaben nach Kategorie ---
+    ausgaben_df = transactions_df[
+        (
+            (transactions_df["Transaktions_Typ"] == "Ausgabe/Einkauf")
+            | (
+                (transactions_df["Transaktions_Typ"] == "Geplante Ausgabe")
+                & (transactions_df["Status"] == "Vom Haus bezahlt")
+            )
+        )
+        & (~transactions_df["Ist_Investition"].fillna(False))
+    ]
+
+    if not ausgaben_df.empty:
+        elements.append(Paragraph("Ausgaben nach Kategorie", H2))
+        cat_sum = ausgaben_df.groupby("Kategorie")["Betrag"].sum().sort_values(ascending=False)
+        cat_rows = [
+            [Paragraph("<b>Kategorie</b>", BODY), Paragraph("<b>Betrag</b>", RIGHT)]
+        ] + [[k, fe(v)] for k, v in cat_sum.items()]
+        t_cat = Table(cat_rows, colWidths=[w * 0.6, w * 0.4])
+        t_cat.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("LEADING", (0, 0), (-1, -1), 13),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("BACKGROUND", (0, 0), (-1, 0), DARK),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.3, MID),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(t_cat)
+        elements.append(Spacer(1, 8))
+
+    # --- Personensalden ---
+    if not person_summary.empty:
+        elements.append(Paragraph("Personensalden", H2))
+        ps_cols = ["Name", "Einzahlungen", "Privat_vorgelegt_Party", "Privat_vorgelegt_Investition", "Rueckerstattungen", "Offene_Auslagen", "Gesamtanspruch_gegen_Haus"]
+        ps_headers = ["Name", "Eingezahlt", "Privat Party", "Privat Invest.", "Erstattet", "Auslage offen", "Anspruch"]
+        cw = A4[0] - 36 * mm
+        col_ws = [cw * 0.18, cw * 0.13, cw * 0.13, cw * 0.13, cw * 0.13, cw * 0.14, cw * 0.16]
+        header_row = [Paragraph(f"<b>{h}</b>", CENTER) for h in ps_headers]
+        data_rows = []
+        for _, row in person_summary.iterrows():
+            data_rows.append([
+                Paragraph(str(row["Name"]), BODY),
+                Paragraph(fe(row["Einzahlungen"]), RIGHT),
+                Paragraph(fe(row["Privat_vorgelegt_Party"]), RIGHT),
+                Paragraph(fe(row["Privat_vorgelegt_Investition"]), RIGHT),
+                Paragraph(fe(row["Rueckerstattungen"]), RIGHT),
+                Paragraph(fe(row["Offene_Auslagen"]), RIGHT),
+                Paragraph(f"<b>{fe(row['Gesamtanspruch_gegen_Haus'])}</b>", RIGHT),
+            ])
+        ps_table = Table([header_row] + data_rows, colWidths=col_ws)
+        ps_table.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("LEADING", (0, 0), (-1, -1), 11),
+            ("BACKGROUND", (0, 0), (-1, 0), DARK),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.3, MID),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("ALIGN", (0, 0), (0, -1), "LEFT"),
+        ]))
+        elements.append(ps_table)
+        elements.append(Spacer(1, 8))
+
+    # --- Einzelposten-Tabelle ---
+    elements.append(Paragraph("Alle Transaktionen", H2))
+    tx_cols = ["Erfasst_Am", "Name", "Transaktions_Typ", "Kategorie", "Kostenbezeichnung", "Betrag", "Status"]
+    tx_headers = ["Datum", "Person", "Typ", "Kategorie", "Bezeichnung", "Betrag", "Status"]
+    tx_cw = A4[0] - 36 * mm
+    tx_col_ws = [tx_cw * 0.10, tx_cw * 0.11, tx_cw * 0.16, tx_cw * 0.12, tx_cw * 0.22, tx_cw * 0.14, tx_cw * 0.15]
+    tx_header_row = [Paragraph(f"<b>{h}</b>", CENTER) for h in tx_headers]
+    tx_data = []
+    for _, row in transactions_df.sort_values("Erfasst_Am").iterrows():
+        datum = row["Erfasst_Am"].strftime("%d.%m.%Y") if pd.notna(row["Erfasst_Am"]) else "-"
+        tx_data.append([
+            Paragraph(datum, BODY),
+            Paragraph(str(row.get("Name", "")), BODY),
+            Paragraph(str(row.get("Transaktions_Typ", "")), BODY),
+            Paragraph(str(row.get("Kategorie", "")), BODY),
+            Paragraph(str(row.get("Kostenbezeichnung", "") or row.get("Beschreibung", "") or ""), BODY),
+            Paragraph(fe(row["Betrag"]), RIGHT),
+            Paragraph(str(row.get("Status", "")), BODY),
+        ])
+    tx_table = Table([tx_header_row] + tx_data, colWidths=tx_col_ws, repeatRows=1)
+    tx_table.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("LEADING", (0, 0), (-1, -1), 10),
+        ("BACKGROUND", (0, 0), (-1, 0), DARK),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.2, MID),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("ALIGN", (5, 0), (5, -1), "RIGHT"),
+    ]))
+    elements.append(tx_table)
+
+    doc.build(elements)
+    return buf.getvalue()
 
 
 def to_sheet_value(value):
@@ -957,6 +1195,32 @@ with overview_tab:
 
     bal_color_hex = "#15803d" if balance_angepasst >= 0 else "#b91c1c"
     bal_sign = "+" if balance_angepasst >= 0 else ""
+
+    # --- PDF-Export ---
+    st.subheader("Hauskasse auf einen Blick")
+    pdf_bytes = build_pdf_report(
+        initial_house_funding=initial_house_funding,
+        people_deposits=people_deposits,
+        party_income=party_income,
+        income_basis=income_basis,
+        party_direct_spend=party_direct_spend,
+        investment_direct_spend=investment_direct_spend,
+        reimbursements_paid=reimbursements_paid,
+        open_to_people=open_to_people,
+        planned_total=planned_total,
+        liquide_mittel=liquide_mittel_angepasst,
+        balance=balance_angepasst,
+        person_summary=person_summary,
+        transactions_df=transactions_df,
+        ohne_anfang=ohne_anfang,
+    )
+    filename = f"THP_Finanzbericht_{date.today().strftime('%Y%m%d')}.pdf"
+    st.download_button(
+        label="Finanzbericht als PDF herunterladen",
+        data=pdf_bytes,
+        file_name=filename,
+        mime="application/pdf",
+    )
 
     def detail_line(label, value):
         return (
