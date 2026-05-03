@@ -396,12 +396,10 @@ def build_pdf_report(
         elements.append(Paragraph("Ausgaben nach Kategorie", H2))
         cat_sum = ausgaben_df.groupby("Kategorie")["Betrag"].sum().sort_values(ascending=False)
 
-        # Chart
         cat_fig = _bar_chart(cat_sum.index.tolist(), cat_sum.values.tolist(), color="#1d4ed8", figsize=(8, 3))
         elements.append(_mpl_to_image(cat_fig, PAGE_W))
         elements.append(Spacer(1, 6))
 
-        # Tabelle daneben
         cat_rows = [
             [Paragraph("<b>Kategorie</b>", BODY), Paragraph("<b>Betrag</b>", RIGHT)]
         ] + [[k, fe(v)] for k, v in cat_sum.items()]
@@ -420,53 +418,165 @@ def build_pdf_report(
         elements.append(t_cat)
         elements.append(Spacer(1, 10))
 
-    # --- Personensalden ---
-    if not person_summary.empty:
-        elements.append(Paragraph("Personensalden", H2))
+        # --- Kosten nach Bezeichnung (Kreisdiagramm) ---
+        elements.append(Paragraph("Kosten nach Bezeichnung", H2))
+        detail_df = ausgaben_df.copy()
+        detail_df["Bezeichnung"] = detail_df.apply(build_cost_label, axis=1)
+        detail_df["Effektive_Anzahl"] = detail_df["Anzahl"]
+        getraenke_mask = (detail_df["Effektive_Anzahl"] <= 0) & (detail_df["Getraenk_Anzahl"] > 0)
+        detail_df.loc[getraenke_mask, "Effektive_Anzahl"] = detail_df.loc[getraenke_mask, "Getraenk_Anzahl"]
+        detail_summary = (
+            detail_df.groupby("Bezeichnung")["Betrag"]
+            .sum()
+            .sort_values(ascending=False)
+        )
+        total_bez = detail_summary.sum()
 
-        # Ansprüche-Chart
-        anspruch_df = person_summary[person_summary["Gesamtanspruch_gegen_Haus"] > 0].copy()
-        if not anspruch_df.empty:
-            n = len(anspruch_df)
-            anspruch_fig = _bar_chart(
-                anspruch_df["Name"].tolist(),
-                anspruch_df["Gesamtanspruch_gegen_Haus"].tolist(),
-                color="#7c3aed",
-                horizontal=True,
-                figsize=(8, max(2.5, 0.5 * n + 0.8)),
-            )
-            elements.append(_mpl_to_image(anspruch_fig, PAGE_W))
-            elements.append(Spacer(1, 6))
+        # Kreisdiagramm mit Matplotlib — Labels nur für Segmente >= 2%
+        pie_fig, pie_ax = plt.subplots(figsize=(9, 5.5), facecolor="white")
+        pie_ax.set_facecolor("white")
+        pie_labels = detail_summary.index.tolist()
+        pie_values = detail_summary.values.tolist()
+        pie_colors = plt.cm.tab20.colors[:len(pie_labels)]
 
-        ps_headers = ["Name", "Eingezahlt", "Privat Party", "Privat Invest.", "Erstattet", "Auslage offen", "Anspruch"]
-        col_ws = [PAGE_W * 0.18, PAGE_W * 0.13, PAGE_W * 0.13, PAGE_W * 0.13, PAGE_W * 0.13, PAGE_W * 0.14, PAGE_W * 0.16]
-        header_row = [Paragraph(f"<b>{h}</b>", CENTER) for h in ps_headers]
-        data_rows = []
-        for _, row in person_summary.iterrows():
-            data_rows.append([
-                Paragraph(str(row["Name"]), BODY),
-                Paragraph(fe(row["Einzahlungen"]), RIGHT),
-                Paragraph(fe(row["Privat_vorgelegt_Party"]), RIGHT),
-                Paragraph(fe(row["Privat_vorgelegt_Investition"]), RIGHT),
-                Paragraph(fe(row["Rueckerstattungen"]), RIGHT),
-                Paragraph(fe(row["Offene_Auslagen"]), RIGHT),
-                Paragraph(f"<b>{fe(row['Gesamtanspruch_gegen_Haus'])}</b>", RIGHT),
-            ])
-        ps_table = Table([header_row] + data_rows, colWidths=col_ws)
-        ps_table.setStyle(TableStyle([
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("LEADING", (0, 0), (-1, -1), 11),
-            ("BACKGROUND", (0, 0), (-1, 0), DARK),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
-            ("LINEBELOW", (0, 0), (-1, -1), 0.3, MID),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
-            ("ALIGN", (0, 0), (0, -1), "LEFT"),
-        ]))
-        elements.append(ps_table)
+        def _autopct(pct):
+            abs_val = pct / 100.0 * total_bez
+            if pct >= 2.0:
+                return f"{pct:.1f}%\n{fe(abs_val)}"
+            return ""
+
+        wedges, texts, autotexts = pie_ax.pie(
+            pie_values,
+            labels=None,
+            autopct=_autopct,
+            colors=pie_colors,
+            pctdistance=0.78,
+            startangle=90,
+            wedgeprops={"linewidth": 0.5, "edgecolor": "white"},
+        )
+        for at in autotexts:
+            at.set_fontsize(6.5)
+        # Legende rechts mit Bezeichnung + Betrag
+        legend_labels = [
+            f"{lbl}  {fe(val)}  ({val/total_bez*100:.1f}%)"
+            for lbl, val in zip(pie_labels, pie_values)
+        ]
+        pie_ax.legend(
+            wedges, legend_labels,
+            loc="center left", bbox_to_anchor=(1.02, 0.5),
+            fontsize=6.5, frameon=False,
+        )
+        pie_ax.set_title("", pad=0)
+        pie_fig.tight_layout()
+        elements.append(_mpl_to_image(pie_fig, PAGE_W))
         elements.append(Spacer(1, 10))
+
+    # --- Details pro Person ---
+    if not person_summary.empty:
+        elements.append(Paragraph("Details pro Person", H2))
+
+        GOLD = colors.HexColor("#7a6000")
+        GOLD_BG = colors.HexColor("#92740020")
+        PERSON_GREEN = colors.HexColor("#1a6b2f")
+        PERSON_GREEN_BG = colors.HexColor("#1a6b2f20")
+
+        COLS_PER_ROW = 3
+        CARD_W = (PAGE_W - (COLS_PER_ROW - 1) * 4 * mm) / COLS_PER_ROW
+
+        LABEL_STYLE = ParagraphStyle("PLABEL", parent=base["Normal"], fontSize=7, textColor=colors.HexColor("#aaaaaa"), leading=10)
+        VAL_STYLE   = ParagraphStyle("PVAL",   parent=base["Normal"], fontSize=8.5, leading=12)
+        NAME_STYLE  = ParagraphStyle("PNAME",  parent=base["Normal"], fontSize=9, fontName="Helvetica-Bold", leading=12)
+        BADGE_W_STYLE = ParagraphStyle("PBADGEW", parent=base["Normal"], fontSize=8, textColor=colors.white, leading=11)
+
+        people_list = person_summary["Name"].tolist()
+        for row_start in range(0, len(people_list), COLS_PER_ROW):
+            row_people = people_list[row_start:row_start + COLS_PER_ROW]
+            card_cells = []
+            for person_name in row_people:
+                row_data = person_summary[person_summary["Name"] == person_name].iloc[0]
+                anspruch   = row_data["Gesamtanspruch_gegen_Haus"]
+                eingezahlt = row_data["Einzahlungen"]
+                vorgelegt  = row_data["Privat_vorgelegt_Gesamt"]
+                vp_party   = row_data["Privat_vorgelegt_Party"]
+                vp_invest  = row_data["Privat_vorgelegt_Investition"]
+                erstattet  = row_data["Rueckerstattungen"]
+                offen      = row_data["Offene_Auslagen"]
+
+                if eingezahlt == 0 and vorgelegt == 0:
+                    badge_text = "Noch nichts eingetragen"
+                    badge_color = GOLD
+                elif anspruch > 0:
+                    badge_text = f"Offen: {fe(anspruch)}"
+                    badge_color = GOLD
+                else:
+                    badge_text = "Alles beglichen"
+                    badge_color = PERSON_GREEN
+
+                card_content = [
+                    [Paragraph(person_name, NAME_STYLE)],
+                    [Table(
+                        [[Paragraph(badge_text, BADGE_W_STYLE)]],
+                        colWidths=[CARD_W - 8 * mm],
+                        style=TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, -1), badge_color),
+                            ("TOPPADDING", (0, 0), (-1, -1), 3),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                        ]),
+                    )],
+                    [Paragraph("Eingezahlt", LABEL_STYLE)],
+                    [Paragraph(fe(eingezahlt), VAL_STYLE)],
+                    [Paragraph("Privat vorgelegt gesamt", LABEL_STYLE)],
+                    [Paragraph(fe(vorgelegt), VAL_STYLE)],
+                    [Paragraph("davon Party / Invest.", LABEL_STYLE)],
+                    [Paragraph(f"{fe(vp_party)} / {fe(vp_invest)}", VAL_STYLE)],
+                    [Paragraph("Erstattet", LABEL_STYLE)],
+                    [Paragraph(fe(erstattet), VAL_STYLE)],
+                    [Paragraph("Anspruch gesamt", LABEL_STYLE)],
+                    [Paragraph(f"<b>{fe(anspruch)}</b>", VAL_STYLE)],
+                ]
+                card_table = Table(card_content, colWidths=[CARD_W - 8 * mm])
+                card_table.setStyle(TableStyle([
+                    ("TOPPADDING", (0, 0), (-1, -1), 1),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ]))
+                # Karte mit Rahmen
+                outer = Table(
+                    [[card_table]],
+                    colWidths=[CARD_W],
+                )
+                outer.setStyle(TableStyle([
+                    ("BOX", (0, 0), (-1, -1), 0.8, MID),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ]))
+                card_cells.append(outer)
+
+            # Fehlende Karten auffüllen
+            while len(card_cells) < COLS_PER_ROW:
+                card_cells.append(Spacer(CARD_W, 1))
+
+            row_table = Table(
+                [card_cells],
+                colWidths=[CARD_W] * COLS_PER_ROW,
+                hAlign="LEFT",
+            )
+            row_table.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4 * mm),
+                ("INNERGRID", (0, 0), (-1, -1), 0, colors.white),
+            ]))
+            elements.append(row_table)
+
+        elements.append(Spacer(1, 6))
 
     # --- Einzelposten-Tabelle ---
     # Spaltenbreiten: Datum breit genug für "dd.mm.yyyy" ohne Umbruch
